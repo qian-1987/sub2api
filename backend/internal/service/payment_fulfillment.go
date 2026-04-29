@@ -292,6 +292,9 @@ func (s *PaymentService) doBalance(ctx context.Context, o *dbent.PaymentOrder) e
 }
 
 func (s *PaymentService) markCompleted(ctx context.Context, o *dbent.PaymentOrder, auditAction string) error {
+	if o != nil && auditAction == "RECHARGE_SUCCESS" && o.OrderType == payment.OrderTypeBalance {
+		s.tryAutoUnlockGroupAfterBalanceRecharge(ctx, o)
+	}
 	now := time.Now()
 	_, err := s.entClient.PaymentOrder.Update().Where(paymentorder.IDEQ(o.ID), paymentorder.StatusEQ(OrderStatusRecharging)).SetStatus(OrderStatusCompleted).SetCompletedAt(now).Save(ctx)
 	if err != nil {
