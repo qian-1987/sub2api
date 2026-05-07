@@ -185,6 +185,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		CustomEndpoints:                        dto.ParseCustomEndpoints(settings.CustomEndpoints),
 		DefaultConcurrency:                     settings.DefaultConcurrency,
 		DefaultBalance:                         settings.DefaultBalance,
+		RiskControlEnabled:                     settings.RiskControlEnabled,
 		AffiliateRebateRate:                    settings.AffiliateRebateRate,
 		AffiliateRebateFreezeHours:             settings.AffiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:            settings.AffiliateRebateDurationDays,
@@ -209,6 +210,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		EnableFingerprintUnification:           settings.EnableFingerprintUnification,
 		EnableMetadataPassthrough:              settings.EnableMetadataPassthrough,
 		EnableCCHSigning:                       settings.EnableCCHSigning,
+		EnableAnthropicCacheTTL1hInjection:     settings.EnableAnthropicCacheTTL1hInjection,
 		WebSearchEmulationEnabled:              settings.WebSearchEmulationEnabled,
 		PaymentVisibleMethodAlipaySource:       settings.PaymentVisibleMethodAlipaySource,
 		PaymentVisibleMethodWxpaySource:        settings.PaymentVisibleMethodWxpaySource,
@@ -248,7 +250,49 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 
 		AffiliateEnabled: settings.AffiliateEnabled,
 	}
+
+	// OpenAI fast policy (stored under a dedicated setting key)
+	if fastPolicy, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context()); err != nil {
+		slog.Error("openai_fast_policy_settings_get_failed", "error", err)
+	} else if fastPolicy != nil {
+		payload.OpenAIFastPolicySettings = openaiFastPolicySettingsToDTO(fastPolicy)
+	}
+
 	response.Success(c, systemSettingsResponseData(payload, authSourceDefaults))
+}
+
+// openaiFastPolicySettingsToDTO converts service -> dto for OpenAI fast policy.
+func openaiFastPolicySettingsToDTO(s *service.OpenAIFastPolicySettings) *dto.OpenAIFastPolicySettings {
+	if s == nil {
+		return nil
+	}
+	rules := make([]dto.OpenAIFastPolicyRule, len(s.Rules))
+	for i, r := range s.Rules {
+		rules[i] = dto.OpenAIFastPolicyRule(r)
+	}
+	return &dto.OpenAIFastPolicySettings{Rules: rules}
+}
+
+// openaiFastPolicySettingsFromDTO converts dto -> service for OpenAI fast policy.
+//
+// 规范化 ServiceTier：在 DTO 进入 service 层之前统一把空字符串归一为
+// service.OpenAIFastTierAny ("all")，避免管理员保存时空串与 "all" 同时
+// 表达"匹配任意 tier"造成数据库取值的二义性。其它非空值原样透传，由
+// service.SetOpenAIFastPolicySettings 负责合法值校验。
+func openaiFastPolicySettingsFromDTO(s *dto.OpenAIFastPolicySettings) *service.OpenAIFastPolicySettings {
+	if s == nil {
+		return nil
+	}
+	rules := make([]service.OpenAIFastPolicyRule, len(s.Rules))
+	for i, r := range s.Rules {
+		rules[i] = service.OpenAIFastPolicyRule(r)
+		tier := strings.ToLower(strings.TrimSpace(rules[i].ServiceTier))
+		if tier == "" {
+			tier = service.OpenAIFastTierAny
+		}
+		rules[i].ServiceTier = tier
+	}
+	return &service.OpenAIFastPolicySettings{Rules: rules}
 }
 
 // UpdateSettingsRequest 更新设置请求
@@ -399,9 +443,10 @@ type UpdateSettingsRequest struct {
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
 	// Gateway forwarding behavior
-	EnableFingerprintUnification *bool `json:"enable_fingerprint_unification"`
-	EnableMetadataPassthrough    *bool `json:"enable_metadata_passthrough"`
-	EnableCCHSigning             *bool `json:"enable_cch_signing"`
+	EnableFingerprintUnification       *bool `json:"enable_fingerprint_unification"`
+	EnableMetadataPassthrough          *bool `json:"enable_metadata_passthrough"`
+	EnableCCHSigning                   *bool `json:"enable_cch_signing"`
+	EnableAnthropicCacheTTL1hInjection *bool `json:"enable_anthropic_cache_ttl_1h_injection"`
 
 	// Payment visible method routing
 	PaymentVisibleMethodAlipaySource  *string `json:"payment_visible_method_alipay_source"`
@@ -452,6 +497,12 @@ type UpdateSettingsRequest struct {
 
 	// Affiliate (邀请返利) feature switch
 	AffiliateEnabled *bool `json:"affiliate_enabled"`
+
+	// 风控中心功能开关
+	RiskControlEnabled *bool `json:"risk_control_enabled"`
+
+	// OpenAI fast/flex policy (optional, only updated when provided)
+	OpenAIFastPolicySettings *dto.OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
 }
 
 // UpdateSettings 更新系统设置
@@ -1228,6 +1279,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.EnableCCHSigning
 		}(),
+		EnableAnthropicCacheTTL1hInjection: func() bool {
+			if req.EnableAnthropicCacheTTL1hInjection != nil {
+				return *req.EnableAnthropicCacheTTL1hInjection
+			}
+			return previousSettings.EnableAnthropicCacheTTL1hInjection
+		}(),
 		PaymentVisibleMethodAlipaySource: func() string {
 			if req.PaymentVisibleMethodAlipaySource != nil {
 				return strings.TrimSpace(*req.PaymentVisibleMethodAlipaySource)
@@ -1312,6 +1369,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.AffiliateEnabled
 		}(),
+		RiskControlEnabled: func() bool {
+			if req.RiskControlEnabled != nil {
+				return *req.RiskControlEnabled
+			}
+			return previousSettings.RiskControlEnabled
+		}(),
 	}
 
 	authSourceDefaults := &service.AuthSourceDefaultSettings{
@@ -1348,6 +1411,14 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	if err := h.settingService.UpdateSettingsWithAuthSourceDefaults(c.Request.Context(), settings, authSourceDefaults); err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+
+	// Update OpenAI fast policy (stored under dedicated key, only when provided).
+	if req.OpenAIFastPolicySettings != nil {
+		if err := h.settingService.SetOpenAIFastPolicySettings(c.Request.Context(), openaiFastPolicySettingsFromDTO(req.OpenAIFastPolicySettings)); err != nil {
+			response.BadRequest(c, err.Error())
+			return
+		}
 	}
 
 	// Update payment configuration (integrated into system settings).
@@ -1517,6 +1588,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		EnableFingerprintUnification:           updatedSettings.EnableFingerprintUnification,
 		EnableMetadataPassthrough:              updatedSettings.EnableMetadataPassthrough,
 		EnableCCHSigning:                       updatedSettings.EnableCCHSigning,
+		EnableAnthropicCacheTTL1hInjection:     updatedSettings.EnableAnthropicCacheTTL1hInjection,
 		PaymentVisibleMethodAlipaySource:       updatedSettings.PaymentVisibleMethodAlipaySource,
 		PaymentVisibleMethodWxpaySource:        updatedSettings.PaymentVisibleMethodWxpaySource,
 		PaymentVisibleMethodAlipayEnabled:      updatedSettings.PaymentVisibleMethodAlipayEnabled,
@@ -1554,6 +1626,13 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		AvailableChannelsEnabled: updatedSettings.AvailableChannelsEnabled,
 
 		AffiliateEnabled: updatedSettings.AffiliateEnabled,
+
+		RiskControlEnabled: updatedSettings.RiskControlEnabled,
+	}
+	if fastPolicy, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context()); err != nil {
+		slog.Error("openai_fast_policy_settings_get_failed", "error", err)
+	} else if fastPolicy != nil {
+		payload.OpenAIFastPolicySettings = openaiFastPolicySettingsToDTO(fastPolicy)
 	}
 	response.Success(c, systemSettingsResponseData(payload, updatedAuthSourceDefaults))
 }
@@ -1891,6 +1970,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.EnableCCHSigning != after.EnableCCHSigning {
 		changed = append(changed, "enable_cch_signing")
 	}
+	if before.EnableAnthropicCacheTTL1hInjection != after.EnableAnthropicCacheTTL1hInjection {
+		changed = append(changed, "enable_anthropic_cache_ttl_1h_injection")
+	}
 	if before.PaymentVisibleMethodAlipaySource != after.PaymentVisibleMethodAlipaySource {
 		changed = append(changed, "payment_visible_method_alipay_source")
 	}
@@ -1933,6 +2015,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	}
 	if before.AffiliateEnabled != after.AffiliateEnabled {
 		changed = append(changed, "affiliate_enabled")
+	}
+	if before.RiskControlEnabled != after.RiskControlEnabled {
+		changed = append(changed, "risk_control_enabled")
 	}
 	changed = appendAuthSourceDefaultChanges(changed, beforeAuthSourceDefaults, afterAuthSourceDefaults)
 	return changed
@@ -2389,6 +2474,58 @@ func (h *SettingHandler) UpdateOverloadCooldownSettings(c *gin.Context) {
 	response.Success(c, dto.OverloadCooldownSettings{
 		Enabled:         updatedSettings.Enabled,
 		CooldownMinutes: updatedSettings.CooldownMinutes,
+	})
+}
+
+// GetRateLimit429CooldownSettings 获取429默认回避配置
+// GET /api/v1/admin/settings/rate-limit-429-cooldown
+func (h *SettingHandler) GetRateLimit429CooldownSettings(c *gin.Context) {
+	settings, err := h.settingService.GetRateLimit429CooldownSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.RateLimit429CooldownSettings{
+		Enabled:         settings.Enabled,
+		CooldownSeconds: settings.CooldownSeconds,
+	})
+}
+
+// UpdateRateLimit429CooldownSettingsRequest 更新429默认回避配置请求
+type UpdateRateLimit429CooldownSettingsRequest struct {
+	Enabled         bool `json:"enabled"`
+	CooldownSeconds int  `json:"cooldown_seconds"`
+}
+
+// UpdateRateLimit429CooldownSettings 更新429默认回避配置
+// PUT /api/v1/admin/settings/rate-limit-429-cooldown
+func (h *SettingHandler) UpdateRateLimit429CooldownSettings(c *gin.Context) {
+	var req UpdateRateLimit429CooldownSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+
+	settings := &service.RateLimit429CooldownSettings{
+		Enabled:         req.Enabled,
+		CooldownSeconds: req.CooldownSeconds,
+	}
+
+	if err := h.settingService.SetRateLimit429CooldownSettings(c.Request.Context(), settings); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	updatedSettings, err := h.settingService.GetRateLimit429CooldownSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.RateLimit429CooldownSettings{
+		Enabled:         updatedSettings.Enabled,
+		CooldownSeconds: updatedSettings.CooldownSeconds,
 	})
 }
 

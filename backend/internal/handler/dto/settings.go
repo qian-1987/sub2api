@@ -142,9 +142,10 @@ type SystemSettings struct {
 	BackendModeEnabled bool `json:"backend_mode_enabled"`
 
 	// Gateway forwarding behavior
-	EnableFingerprintUnification bool `json:"enable_fingerprint_unification"`
-	EnableMetadataPassthrough    bool `json:"enable_metadata_passthrough"`
-	EnableCCHSigning             bool `json:"enable_cch_signing"`
+	EnableFingerprintUnification       bool `json:"enable_fingerprint_unification"`
+	EnableMetadataPassthrough          bool `json:"enable_metadata_passthrough"`
+	EnableCCHSigning                   bool `json:"enable_cch_signing"`
+	EnableAnthropicCacheTTL1hInjection bool `json:"enable_anthropic_cache_ttl_1h_injection"`
 
 	// Web Search Emulation
 	WebSearchEmulationEnabled bool `json:"web_search_emulation_enabled"`
@@ -196,8 +197,14 @@ type SystemSettings struct {
 	// Available Channels feature switch (user-facing aggregate view)
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
 
+	// 风控中心功能开关
+	RiskControlEnabled bool `json:"risk_control_enabled"`
+
 	// Affiliate (邀请返利) feature switch
 	AffiliateEnabled bool `json:"affiliate_enabled"`
+
+	// OpenAI fast/flex policy
+	OpenAIFastPolicySettings *OpenAIFastPolicySettings `json:"openai_fast_policy_settings,omitempty"`
 }
 
 type DefaultSubscriptionSetting struct {
@@ -252,12 +259,20 @@ type PublicSettings struct {
 	AvailableChannelsEnabled bool `json:"available_channels_enabled"`
 
 	AffiliateEnabled bool `json:"affiliate_enabled"`
+
+	RiskControlEnabled bool `json:"risk_control_enabled"`
 }
 
 // OverloadCooldownSettings 529过载冷却配置 DTO
 type OverloadCooldownSettings struct {
 	Enabled         bool `json:"enabled"`
 	CooldownMinutes int  `json:"cooldown_minutes"`
+}
+
+// RateLimit429CooldownSettings 429默认回避配置 DTO
+type RateLimit429CooldownSettings struct {
+	Enabled         bool `json:"enabled"`
+	CooldownSeconds int  `json:"cooldown_seconds"`
 }
 
 // StreamTimeoutSettings 流超时处理配置 DTO
@@ -292,6 +307,22 @@ type BetaPolicyRule struct {
 // BetaPolicySettings Beta 策略配置 DTO
 type BetaPolicySettings struct {
 	Rules []BetaPolicyRule `json:"rules"`
+}
+
+// OpenAIFastPolicyRule OpenAI fast/flex 策略规则 DTO
+type OpenAIFastPolicyRule struct {
+	ServiceTier          string   `json:"service_tier"`
+	Action               string   `json:"action"`
+	Scope                string   `json:"scope"`
+	ErrorMessage         string   `json:"error_message,omitempty"`
+	ModelWhitelist       []string `json:"model_whitelist,omitempty"`
+	FallbackAction       string   `json:"fallback_action,omitempty"`
+	FallbackErrorMessage string   `json:"fallback_error_message,omitempty"`
+}
+
+// OpenAIFastPolicySettings OpenAI fast 策略配置 DTO
+type OpenAIFastPolicySettings struct {
+	Rules []OpenAIFastPolicyRule `json:"rules"`
 }
 
 // ParseCustomMenuItems parses a JSON string into a slice of CustomMenuItem.
