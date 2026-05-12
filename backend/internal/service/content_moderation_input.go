@@ -1,7 +1,13 @@
 package service
 
 import (
+<<<<<<< HEAD
 	"fmt"
+=======
+	"crypto/rand"
+	"fmt"
+	"math/big"
+>>>>>>> origin/main
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -42,6 +48,7 @@ func ExtractContentModerationInput(protocol string, body []byte) ContentModerati
 	return out
 }
 
+<<<<<<< HEAD
 func collectRoleMessages(messages gjson.Result, role string, parts *[]string, images *[]string) {
 	if !messages.IsArray() {
 		return
@@ -54,6 +61,8 @@ func collectRoleMessages(messages gjson.Result, role string, parts *[]string, im
 	})
 }
 
+=======
+>>>>>>> origin/main
 func collectLastRoleMessage(messages gjson.Result, role string, parts *[]string, images *[]string) {
 	if !messages.IsArray() {
 		return
@@ -131,6 +140,7 @@ func isAnthropicSystemReminderText(text string) bool {
 	return strings.HasPrefix(strings.TrimSpace(text), "<system-reminder>")
 }
 
+<<<<<<< HEAD
 func collectResponsesInput(input gjson.Result, parts *[]string, images *[]string) {
 	switch {
 	case !input.Exists():
@@ -155,6 +165,8 @@ func collectResponsesInput(input gjson.Result, parts *[]string, images *[]string
 	}
 }
 
+=======
+>>>>>>> origin/main
 func collectLastResponsesInput(input gjson.Result, parts *[]string, images *[]string) {
 	switch {
 	case !input.Exists():
@@ -206,6 +218,7 @@ func responseItemHasModerationText(item gjson.Result) bool {
 	return normalizeContentModerationText(strings.Join(parts, "\n")) != "" || len(images) > 0
 }
 
+<<<<<<< HEAD
 func collectGeminiContents(contents gjson.Result, parts *[]string, images *[]string) {
 	if !contents.IsArray() {
 		return
@@ -225,6 +238,8 @@ func collectGeminiContents(contents gjson.Result, parts *[]string, images *[]str
 	})
 }
 
+=======
+>>>>>>> origin/main
 func collectLastGeminiContent(contents gjson.Result, parts *[]string, images *[]string) {
 	if !contents.IsArray() {
 		return
@@ -254,6 +269,7 @@ func collectLastGeminiContent(contents gjson.Result, parts *[]string, images *[]
 	*images = append(*images, lastImages...)
 }
 
+<<<<<<< HEAD
 func countGeminiUserContents(contents gjson.Result) int {
 	if !contents.IsArray() {
 		return 0
@@ -269,6 +285,8 @@ func countGeminiUserContents(contents gjson.Result) int {
 	return count
 }
 
+=======
+>>>>>>> origin/main
 func collectContentValue(value gjson.Result, parts *[]string, images *[]string) {
 	switch {
 	case !value.Exists():
@@ -361,6 +379,20 @@ func normalizeModerationImages(images []string) []string {
 	return out
 }
 
+<<<<<<< HEAD
+=======
+func limitContentModerationImages(images []string) []string {
+	if len(images) <= maxContentModerationInputImages {
+		return images
+	}
+	idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(images))))
+	if err != nil {
+		return images[:maxContentModerationInputImages]
+	}
+	return []string{images[int(idx.Int64())]}
+}
+
+>>>>>>> origin/main
 func addModerationText(parts *[]string, text string) {
 	text = strings.TrimSpace(text)
 	if text == "" {

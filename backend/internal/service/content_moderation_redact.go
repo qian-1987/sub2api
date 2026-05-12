@@ -6,6 +6,10 @@ import (
 )
 
 var contentModerationSecretPatterns = []*regexp.Regexp{
+<<<<<<< HEAD
+=======
+	regexp.MustCompile(`(?i)\bhttps?://[^\s"'<>，。；、]+`),
+>>>>>>> origin/main
 	regexp.MustCompile(`(?i)\b((?:api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|token|session|cookie|set[_-]?cookie|authorization|bearer|password|passwd|pwd|secret|client[_-]?secret|private[_-]?key)\s*[:=]\s*)(["']?)[^"'\s,;，。；、]{6,}`),
 	regexp.MustCompile(`(?i)\b(Bearer\s+)[A-Za-z0-9._~+/=-]{12,}`),
 	regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b`),
@@ -24,9 +28,15 @@ func redactContentModerationSecrets(text string) string {
 	out := text
 	for idx, pattern := range contentModerationSecretPatterns {
 		switch idx {
+<<<<<<< HEAD
 		case 0:
 			out = pattern.ReplaceAllString(out, `${1}${2}[已脱敏]`)
 		case 1:
+=======
+		case 1:
+			out = pattern.ReplaceAllString(out, `${1}${2}[已脱敏]`)
+		case 2:
+>>>>>>> origin/main
 			out = pattern.ReplaceAllString(out, `${1}[已脱敏]`)
 		default:
 			out = pattern.ReplaceAllString(out, `[已脱敏]`)

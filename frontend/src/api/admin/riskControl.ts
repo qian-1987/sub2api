@@ -80,6 +80,11 @@ export interface UpdateContentModerationConfig {
   model?: string
   api_key?: string
   api_keys?: string[]
+<<<<<<< HEAD
+=======
+  api_keys_mode?: 'append' | 'replace'
+  delete_api_key_hashes?: string[]
+>>>>>>> origin/main
   clear_api_key?: boolean
   timeout_ms?: number
   sample_rate?: number

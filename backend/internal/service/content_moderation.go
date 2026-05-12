@@ -29,6 +29,12 @@ const (
 	ContentModerationModeObserve  = "observe"
 	ContentModerationModePreBlock = "pre_block"
 
+<<<<<<< HEAD
+=======
+	contentModerationAPIKeysModeAppend  = "append"
+	contentModerationAPIKeysModeReplace = "replace"
+
+>>>>>>> origin/main
 	ContentModerationActionAllow     = "allow"
 	ContentModerationActionBlock     = "block"
 	ContentModerationActionHashBlock = "hash_block"
@@ -61,9 +67,17 @@ const (
 	defaultContentModerationNonHitRetentionDays  = 3
 	maxContentModerationRetentionDays            = 3650
 	maxContentModerationNonHitRetentionDays      = 3
+<<<<<<< HEAD
 	contentModerationKeyFailureFreezeThreshold   = 3
 	contentModerationKeyFreezeDuration           = time.Minute
 	maxContentModerationTestImages               = 4
+=======
+	contentModerationKeyRateLimitFreezeDuration  = time.Minute
+	contentModerationKeyAuthFreezeDuration       = 10 * time.Minute
+	contentModerationKeyHTTPErrorFreezeDuration  = 10 * time.Second
+	maxContentModerationInputImages              = 1
+	maxContentModerationTestImages               = maxContentModerationInputImages
+>>>>>>> origin/main
 	maxContentModerationTestImageBytes           = 8 * 1024 * 1024
 	maxContentModerationTestImageDataURLBytes    = 12 * 1024 * 1024
 
@@ -215,6 +229,11 @@ type UpdateContentModerationConfigInput struct {
 	Model                *string   `json:"model"`
 	APIKey               *string   `json:"api_key"`
 	APIKeys              *[]string `json:"api_keys"`
+<<<<<<< HEAD
+=======
+	APIKeysMode          string    `json:"api_keys_mode"`
+	DeleteAPIKeyHashes   *[]string `json:"delete_api_key_hashes"`
+>>>>>>> origin/main
 	ClearAPIKey          bool      `json:"clear_api_key"`
 	TimeoutMS            *int      `json:"timeout_ms"`
 	SampleRate           *int      `json:"sample_rate"`
@@ -268,6 +287,7 @@ func (in ContentModerationInput) IsEmpty() bool {
 }
 
 func (in ContentModerationInput) ModerationInput() any {
+<<<<<<< HEAD
 	if len(in.Images) == 0 {
 		return in.Text
 	}
@@ -276,6 +296,17 @@ func (in ContentModerationInput) ModerationInput() any {
 		parts = append(parts, moderationAPIInputPart{Type: "text", Text: in.Text})
 	}
 	for _, image := range in.Images {
+=======
+	images := limitContentModerationImages(in.Images)
+	if len(images) == 0 {
+		return in.Text
+	}
+	parts := make([]moderationAPIInputPart, 0, len(images)+1)
+	if strings.TrimSpace(in.Text) != "" {
+		parts = append(parts, moderationAPIInputPart{Type: "text", Text: in.Text})
+	}
+	for _, image := range images {
+>>>>>>> origin/main
 		parts = append(parts, moderationAPIInputPart{
 			Type:     "image_url",
 			ImageURL: &moderationAPIImageURLRef{URL: image},
@@ -565,8 +596,22 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 		cfg.APIKey = ""
 		cfg.APIKeys = []string{}
 	} else {
+<<<<<<< HEAD
 		if input.APIKeys != nil {
 			cfg.APIKeys = normalizeModerationAPIKeys(*input.APIKeys)
+=======
+		apiKeysMode := normalizeContentModerationAPIKeysMode(input.APIKeysMode)
+		if input.DeleteAPIKeyHashes != nil && apiKeysMode != contentModerationAPIKeysModeReplace {
+			cfg.APIKeys = deleteModerationAPIKeysByHash(cfg.apiKeys(), *input.DeleteAPIKeyHashes)
+			cfg.APIKey = ""
+		}
+		if input.APIKeys != nil {
+			if apiKeysMode == contentModerationAPIKeysModeReplace {
+				cfg.APIKeys = normalizeModerationAPIKeys(*input.APIKeys)
+			} else {
+				cfg.APIKeys = normalizeModerationAPIKeys(append(cfg.apiKeys(), *input.APIKeys...))
+			}
+>>>>>>> origin/main
 			cfg.APIKey = ""
 		}
 		if input.APIKey != nil && strings.TrimSpace(*input.APIKey) != "" {
@@ -636,7 +681,11 @@ func (s *ContentModerationService) TestAPIKeys(ctx context.Context, input TestCo
 		latency := int(time.Since(start).Milliseconds())
 		keyHash := moderationAPIKeyHash(key)
 		if err != nil {
+<<<<<<< HEAD
 			s.markAPIKeyFailure(key, err.Error(), latency, httpStatus)
+=======
+			s.markAPIKeyError(key, err.Error(), latency, httpStatus)
+>>>>>>> origin/main
 		} else {
 			s.markAPIKeySuccess(key, latency, httpStatus)
 			if auditResult == nil {
@@ -1227,8 +1276,16 @@ func (s *ContentModerationService) callModeration(ctx context.Context, cfg *Cont
 			s.markAPIKeySuccess(key, latency, httpStatus)
 			return result, nil
 		}
+<<<<<<< HEAD
 		s.markAPIKeyFailure(key, err.Error(), latency, httpStatus)
 		lastErr = err
+=======
+		s.markAPIKeyError(key, err.Error(), latency, httpStatus)
+		lastErr = err
+		if httpStatus == http.StatusBadRequest {
+			break
+		}
+>>>>>>> origin/main
 		if attempt == attempts-1 {
 			break
 		}
@@ -1242,6 +1299,7 @@ func (s *ContentModerationService) callModeration(ctx context.Context, cfg *Cont
 	return nil, lastErr
 }
 
+<<<<<<< HEAD
 func (s *ContentModerationService) callModerationOnce(ctx context.Context, cfg *ContentModerationConfig, text string) (*moderationAPIResult, error) {
 	key := s.nextAPIKey(cfg)
 	return s.callModerationOnceWithKey(ctx, cfg, key, text, nil)
@@ -1251,6 +1309,8 @@ func (s *ContentModerationService) callModerationOnceWithKey(ctx context.Context
 	return s.callModerationOnceWithInput(ctx, cfg, apiKey, text, httpStatus)
 }
 
+=======
+>>>>>>> origin/main
 func (s *ContentModerationService) callModerationOnceWithInput(ctx context.Context, cfg *ContentModerationConfig, apiKey string, input any, httpStatus *int) (*moderationAPIResult, error) {
 	base := strings.TrimRight(cfg.BaseURL, "/")
 	endpoint, err := url.JoinPath(base, "/v1/moderations")
@@ -1284,7 +1344,11 @@ func (s *ContentModerationService) callModerationOnceWithInput(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
+<<<<<<< HEAD
 	defer resp.Body.Close()
+=======
+	defer func() { _ = resp.Body.Close() }()
+>>>>>>> origin/main
 	if httpStatus != nil {
 		*httpStatus = resp.StatusCode
 	}
@@ -1563,6 +1627,7 @@ func (cfg *ContentModerationConfig) apiKeys() []string {
 	return normalizeModerationAPIKeys(cfg.APIKeys)
 }
 
+<<<<<<< HEAD
 func (s *ContentModerationService) nextAPIKey(cfg *ContentModerationConfig) string {
 	keys := cfg.apiKeys()
 	if len(keys) == 0 {
@@ -1572,6 +1637,8 @@ func (s *ContentModerationService) nextAPIKey(cfg *ContentModerationConfig) stri
 	return keys[idx]
 }
 
+=======
+>>>>>>> origin/main
 func (s *ContentModerationService) nextUsableAPIKey(cfg *ContentModerationConfig) (string, bool) {
 	keys := cfg.apiKeys()
 	if len(keys) == 0 {
@@ -1617,7 +1684,11 @@ func (s *ContentModerationService) markAPIKeySuccess(key string, latencyMS int, 
 	state.LastTested = true
 }
 
+<<<<<<< HEAD
 func (s *ContentModerationService) markAPIKeyFailure(key string, errText string, latencyMS int, httpStatus int) {
+=======
+func (s *ContentModerationService) markAPIKeyError(key string, errText string, latencyMS int, httpStatus int) {
+>>>>>>> origin/main
 	hash := moderationAPIKeyHash(key)
 	if hash == "" || s == nil {
 		return
@@ -1625,14 +1696,38 @@ func (s *ContentModerationService) markAPIKeyFailure(key string, errText string,
 	s.keyHealthMu.Lock()
 	defer s.keyHealthMu.Unlock()
 	state := s.ensureAPIKeyHealthLocked(hash, maskSecretTail(key))
+<<<<<<< HEAD
 	state.FailureCount++
+=======
+	if contentModerationFreezeDurationForHTTPStatus(httpStatus) > 0 {
+		state.FailureCount++
+	}
+>>>>>>> origin/main
 	state.LastError = trimRunes(errText, 180)
 	state.LastCheckedAt = time.Now()
 	state.LastLatencyMS = latencyMS
 	state.LastHTTPStatus = httpStatus
 	state.LastTested = true
+<<<<<<< HEAD
 	if state.FailureCount >= contentModerationKeyFailureFreezeThreshold {
 		state.FrozenUntil = time.Now().Add(contentModerationKeyFreezeDuration)
+=======
+	if freezeDuration := contentModerationFreezeDurationForHTTPStatus(httpStatus); freezeDuration > 0 {
+		state.FrozenUntil = time.Now().Add(freezeDuration)
+	}
+}
+
+func contentModerationFreezeDurationForHTTPStatus(httpStatus int) time.Duration {
+	switch httpStatus {
+	case 0, http.StatusBadRequest:
+		return 0
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return contentModerationKeyAuthFreezeDuration
+	case http.StatusTooManyRequests, 529:
+		return contentModerationKeyRateLimitFreezeDuration
+	default:
+		return contentModerationKeyHTTPErrorFreezeDuration
+>>>>>>> origin/main
 	}
 }
 
@@ -1947,6 +2042,40 @@ func normalizeModerationAPIKeys(keys []string) []string {
 	return out
 }
 
+<<<<<<< HEAD
+=======
+func deleteModerationAPIKeysByHash(keys []string, hashes []string) []string {
+	keys = normalizeModerationAPIKeys(keys)
+	deleteHashes := make(map[string]struct{}, len(hashes))
+	for _, hash := range hashes {
+		hash = normalizeContentModerationHash(hash)
+		if hash != "" {
+			deleteHashes[hash] = struct{}{}
+		}
+	}
+	if len(deleteHashes) == 0 {
+		return keys
+	}
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if _, ok := deleteHashes[moderationAPIKeyHash(key)]; ok {
+			continue
+		}
+		out = append(out, key)
+	}
+	return out
+}
+
+func normalizeContentModerationAPIKeysMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case contentModerationAPIKeysModeReplace:
+		return contentModerationAPIKeysModeReplace
+	default:
+		return contentModerationAPIKeysModeAppend
+	}
+}
+
+>>>>>>> origin/main
 func normalizeContentModerationHash(inputHash string) string {
 	inputHash = strings.ToLower(strings.TrimSpace(inputHash))
 	if len(inputHash) != sha256.Size*2 {
