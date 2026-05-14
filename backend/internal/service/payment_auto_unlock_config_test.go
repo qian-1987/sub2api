@@ -88,6 +88,38 @@ func TestLoadPaymentAutoUnlockConfigRejectsInvalidEnabledConfig(t *testing.T) {
 	assert.ErrorContains(t, err, "threshold")
 }
 
+func TestLoadPaymentAutoUnlockConfigRulesFromFile(t *testing.T) {
+	resetPaymentAutoUnlockEnv(t)
+
+	path := filepath.Join(t.TempDir(), paymentAutoUnlockConfigFilename)
+	writePaymentAutoUnlockConfigFile(t, path, `{
+		"custom_payment_auto_unlock_enabled": true,
+		"custom_payment_auto_unlock_rules": [
+			{
+				"key": "VIP",
+				"threshold": 0.1,
+				"group_name": "VIP"
+			},
+			{
+				"key": "5.5-VIP",
+				"threshold": 0.2,
+				"group_name": "5.5-VIP"
+			}
+		]
+	}`)
+	t.Setenv(paymentAutoUnlockConfigFileEnv, path)
+
+	cfg, err := loadPaymentAutoUnlockConfig()
+	require.NoError(t, err)
+	assert.Equal(t, paymentAutoUnlockConfig{
+		Enabled: true,
+		Rules: []paymentAutoUnlockRule{
+			{Key: "VIP", Threshold: 0.1, GroupName: "VIP"},
+			{Key: "5.5-VIP", Threshold: 0.2, GroupName: "5.5-VIP"},
+		},
+	}, cfg)
+}
+
 func writePaymentAutoUnlockConfigFile(t *testing.T, path string, content string) {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))

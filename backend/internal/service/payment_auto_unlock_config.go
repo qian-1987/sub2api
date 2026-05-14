@@ -23,12 +23,21 @@ type paymentAutoUnlockConfig struct {
 	Enabled   bool
 	Threshold float64
 	GroupID   int64
+	Rules     []paymentAutoUnlockRule
+}
+
+type paymentAutoUnlockRule struct {
+	Key       string  `json:"key"`
+	Threshold float64 `json:"threshold"`
+	GroupID   int64   `json:"group_id"`
+	GroupName string  `json:"group_name"`
 }
 
 type paymentAutoUnlockConfigSource struct {
-	Enabled   *bool   `json:"custom_payment_auto_unlock_enabled"`
-	Threshold *float64 `json:"custom_payment_auto_unlock_threshold"`
-	GroupID   *int64  `json:"custom_payment_auto_unlock_group_id"`
+	Enabled   *bool                    `json:"custom_payment_auto_unlock_enabled"`
+	Threshold *float64                 `json:"custom_payment_auto_unlock_threshold"`
+	GroupID   *int64                   `json:"custom_payment_auto_unlock_group_id"`
+	Rules     *[]paymentAutoUnlockRule `json:"custom_payment_auto_unlock_rules"`
 }
 
 func loadPaymentAutoUnlockConfig() (paymentAutoUnlockConfig, error) {
@@ -125,17 +134,100 @@ func applyPaymentAutoUnlockConfigSource(cfg *paymentAutoUnlockConfig, source pay
 	if source.GroupID != nil {
 		cfg.GroupID = *source.GroupID
 	}
+	if source.Rules != nil {
+		cfg.Rules = make([]paymentAutoUnlockRule, 0, len(*source.Rules))
+		for _, rule := range *source.Rules {
+			cfg.Rules = append(cfg.Rules, normalizePaymentAutoUnlockRule(rule))
+		}
+	}
 }
 
 func validatePaymentAutoUnlockConfig(cfg paymentAutoUnlockConfig) error {
 	if !cfg.Enabled {
 		return nil
 	}
-	if cfg.Threshold <= 0 {
-		return fmt.Errorf("payment auto unlock threshold must be greater than 0")
+
+	rules := cfg.effectiveRules()
+	if len(rules) == 0 {
+		return fmt.Errorf("payment auto unlock requires at least one rule when enabled")
 	}
-	if cfg.GroupID <= 0 {
-		return fmt.Errorf("payment auto unlock group_id must be greater than 0")
+
+	usingLegacyRule := len(cfg.Rules) == 0
+	for _, rule := range rules {
+		label := paymentAutoUnlockRuleLabel(rule)
+		if usingLegacyRule {
+			if rule.Threshold <= 0 {
+				return fmt.Errorf("payment auto unlock threshold must be greater than 0")
+			}
+		} else if rule.Threshold < 0 {
+			return fmt.Errorf("payment auto unlock rule %s threshold must be greater than or equal to 0", label)
+		}
+
+		if rule.GroupID <= 0 && rule.GroupName == "" {
+			return fmt.Errorf("payment auto unlock rule %s must set group_id or group_name", label)
+		}
 	}
 	return nil
+}
+
+func (cfg paymentAutoUnlockConfig) effectiveRules() []paymentAutoUnlockRule {
+	if len(cfg.Rules) > 0 {
+		rules := make([]paymentAutoUnlockRule, 0, len(cfg.Rules))
+		for _, rule := range cfg.Rules {
+			rules = append(rules, normalizePaymentAutoUnlockRule(rule))
+		}
+		return rules
+	}
+	if cfg.Threshold > 0 || cfg.GroupID > 0 {
+		return []paymentAutoUnlockRule{
+			normalizePaymentAutoUnlockRule(paymentAutoUnlockRule{
+				Key:       "legacy",
+				Threshold: cfg.Threshold,
+				GroupID:   cfg.GroupID,
+			}),
+		}
+	}
+	return nil
+}
+
+func normalizePaymentAutoUnlockRule(rule paymentAutoUnlockRule) paymentAutoUnlockRule {
+	rule.Key = strings.TrimSpace(rule.Key)
+	rule.GroupName = strings.TrimSpace(rule.GroupName)
+	return rule
+}
+
+func paymentAutoUnlockRuleLabel(rule paymentAutoUnlockRule) string {
+	rule = normalizePaymentAutoUnlockRule(rule)
+	if rule.Key != "" {
+		return strconv.Quote(rule.Key)
+	}
+	return strconv.Quote(paymentAutoUnlockRuleTargetDescription(rule))
+}
+
+func paymentAutoUnlockRuleTargetDescription(rule paymentAutoUnlockRule) string {
+	rule = normalizePaymentAutoUnlockRule(rule)
+	switch {
+	case rule.GroupID > 0:
+		return fmt.Sprintf("group_id=%d", rule.GroupID)
+	case rule.GroupName != "":
+		return "group_name=" + rule.GroupName
+	default:
+		return "missing_target"
+	}
+}
+
+func paymentAutoUnlockRuleMatchesGroup(rule paymentAutoUnlockRule, group *Group) bool {
+	if group == nil {
+		return false
+	}
+	rule = normalizePaymentAutoUnlockRule(rule)
+	if rule.GroupID > 0 && group.ID == rule.GroupID {
+		return true
+	}
+	return rule.GroupName != "" && strings.EqualFold(strings.TrimSpace(group.Name), rule.GroupName)
+}
+
+func paymentAutoUnlockRuleQualifies(rule paymentAutoUnlockRule, totalRecharged float64) bool {
+	rule = normalizePaymentAutoUnlockRule(rule)
+	return totalRecharged >= rule.Threshold
 }

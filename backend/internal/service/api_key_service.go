@@ -316,13 +316,22 @@ func (s *APIKeyService) incrementAPIKeyErrorCount(ctx context.Context, userID in
 // 对于订阅类型分组：检查用户是否有有效订阅
 // 对于标准类型分组：使用原有的 AllowedGroups 和 IsExclusive 逻辑
 func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group *Group) bool {
+	if user == nil || group == nil {
+		return false
+	}
 	// 订阅类型分组：需要有效订阅
 	if group.IsSubscriptionType() {
+		if s.userSubRepo == nil {
+			return false
+		}
 		_, err := s.userSubRepo.GetActiveByUserIDAndGroupID(ctx, user.ID, group.ID)
 		return err == nil // 有有效订阅则允许
 	}
-	// 标准类型分组：使用原有逻辑
-	return user.CanBindGroup(group.ID, group.IsExclusive)
+	// 标准类型分组：先走显式授权，再兜底累计充值资格
+	if user.CanBindGroup(group.ID, group.IsExclusive) {
+		return true
+	}
+	return canUserBindRechargeUnlockedGroup(user, group, loadPaymentAutoUnlockConfigForRead())
 }
 
 // Create 创建API Key
@@ -764,10 +773,12 @@ func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([
 		subscribedGroupIDs[sub.GroupID] = true
 	}
 
+	autoUnlockCfg := loadPaymentAutoUnlockConfigForRead()
+
 	// 过滤出用户有权限的分组
 	availableGroups := make([]Group, 0)
 	for _, group := range allGroups {
-		if s.canUserBindGroupInternal(user, &group, subscribedGroupIDs) {
+		if s.canUserBindGroupInternal(user, &group, subscribedGroupIDs, autoUnlockCfg) {
 			availableGroups = append(availableGroups, group)
 		}
 	}
@@ -776,13 +787,41 @@ func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([
 }
 
 // canUserBindGroupInternal 内部方法，检查用户是否可以绑定分组（使用预加载的订阅数据）
-func (s *APIKeyService) canUserBindGroupInternal(user *User, group *Group, subscribedGroupIDs map[int64]bool) bool {
+func (s *APIKeyService) canUserBindGroupInternal(user *User, group *Group, subscribedGroupIDs map[int64]bool, autoUnlockCfg paymentAutoUnlockConfig) bool {
+	if user == nil || group == nil {
+		return false
+	}
 	// 订阅类型分组：需要有效订阅
 	if group.IsSubscriptionType() {
 		return subscribedGroupIDs[group.ID]
 	}
-	// 标准类型分组：使用原有逻辑
-	return user.CanBindGroup(group.ID, group.IsExclusive)
+	if user.CanBindGroup(group.ID, group.IsExclusive) {
+		return true
+	}
+	return canUserBindRechargeUnlockedGroup(user, group, autoUnlockCfg)
+}
+
+func loadPaymentAutoUnlockConfigForRead() paymentAutoUnlockConfig {
+	cfg, err := loadPaymentAutoUnlockConfig()
+	if err != nil {
+		return paymentAutoUnlockConfig{}
+	}
+	return cfg
+}
+
+func canUserBindRechargeUnlockedGroup(user *User, group *Group, cfg paymentAutoUnlockConfig) bool {
+	if user == nil || group == nil {
+		return false
+	}
+	if group.IsSubscriptionType() || !group.IsExclusive || !cfg.Enabled {
+		return false
+	}
+	for _, rule := range cfg.effectiveRules() {
+		if paymentAutoUnlockRuleMatchesGroup(rule, group) && paymentAutoUnlockRuleQualifies(rule, user.TotalRecharged) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *APIKeyService) SearchAPIKeys(ctx context.Context, userID int64, keyword string, limit int) ([]APIKey, error) {
