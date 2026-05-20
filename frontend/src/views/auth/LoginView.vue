@@ -213,7 +213,11 @@ import Icon from '@/components/icons/Icon.vue'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import { useAuthStore, useAppStore } from '@/stores'
 import { getPublicSettings, isTotp2FARequired, isWeChatWebOAuthEnabled } from '@/api/auth'
+<<<<<<< HEAD
+import type { TotpLoginResponse } from '@/types'
+=======
 import type { LoginAgreementDocument, TotpLoginResponse } from '@/types'
+>>>>>>> origin/main
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { clearAllAffiliateReferralCodes } from '@/utils/oauthAffiliate'
 

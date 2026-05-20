@@ -1,0 +1,25 @@
+{
+  "custom_payment_auto_unlock_enabled": true,
+  "custom_payment_auto_unlock_rules": [
+    {
+      "key": "default",
+      "threshold": 0,
+      "group_name": "default"
+    },
+    {
+      "key": "5.5-default",
+      "threshold": 0,
+      "group_name": "5.5-default"
+    },
+    {
+      "key": "VIP",
+      "threshold": 20,
+      "group_name": "VIP"
+    },
+    {
+      "key": "5.5-VIP",
+      "threshold": 20,
+      "group_name": "5.5-VIP"
+    }
+  ]
+}

@@ -304,12 +304,15 @@ type PublicSettings struct {
 	AffiliateEnabled bool `json:"affiliate_enabled"`
 
 	RiskControlEnabled bool `json:"risk_control_enabled"`
+<<<<<<< HEAD
+=======
 }
 
 type LoginAgreementDocument struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
 	ContentMD string `json:"content_md"`
+>>>>>>> origin/main
 }
 
 // OverloadCooldownSettings 529过载冷却配置 DTO

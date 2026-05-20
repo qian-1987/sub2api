@@ -188,6 +188,53 @@ func TestTryPaymentAutoUnlockAfterBalanceRechargeReportsRechargeHistoryFailure(t
 	assert.Empty(t, groupRepo.requestedGroupIDs)
 }
 
+func TestTryPaymentAutoUnlockAfterBalanceRechargeGrantsAllQualifiedRulesByName(t *testing.T) {
+	userRepo := &paymentAutoUnlockUserRepoStub{}
+	groupRepo := &paymentAutoUnlockGroupRepoStub{
+		activeGroups: []Group{
+			{ID: 1, Name: "default", Status: StatusActive, IsExclusive: false, SubscriptionType: SubscriptionTypeStandard},
+			{ID: 2, Name: "VIP", Status: StatusActive, IsExclusive: true, SubscriptionType: SubscriptionTypeStandard},
+			{ID: 3, Name: "5.5-VIP", Status: StatusActive, IsExclusive: true, SubscriptionType: SubscriptionTypeStandard},
+		},
+	}
+	rechargeHistoryRepo := &paymentAutoUnlockRechargeHistoryRepoStub{total: 0.28}
+	authCache := &paymentAutoUnlockAuthCacheInvalidatorStub{}
+
+	attempt := tryPaymentAutoUnlockAfterBalanceRecharge(context.Background(), paymentAutoUnlockDependencies{
+		userRepo:             userRepo,
+		groupRepo:            groupRepo,
+		rechargeHistoryRepo:  rechargeHistoryRepo,
+		authCacheInvalidator: authCache,
+		loadConfig: func() (paymentAutoUnlockConfig, error) {
+			return paymentAutoUnlockConfig{
+				Enabled: true,
+				Rules: []paymentAutoUnlockRule{
+					{Key: "default", Threshold: 0, GroupName: "default"},
+					{Key: "VIP", Threshold: 0.1, GroupName: "VIP"},
+					{Key: "5.5-VIP", Threshold: 0.2, GroupName: "5.5-VIP"},
+				},
+			}, nil
+		},
+	}, &dbent.PaymentOrder{
+		UserID:    21,
+		OrderType: payment.OrderTypeBalance,
+		Amount:    0.14,
+	})
+
+	require.Equal(t, paymentAutoUnlockStatusGranted, attempt.Status)
+	assert.Equal(t, 0.28, attempt.TotalRecharged)
+	assert.Equal(t, []paymentAutoUnlockGrantCall{
+		{userID: 21, groupID: 2},
+		{userID: 21, groupID: 3},
+	}, userRepo.added)
+	assert.Equal(t, []paymentAutoUnlockGrantedGroup{
+		{RuleKey: "VIP", Threshold: 0.1, GroupID: 2, GroupName: "VIP"},
+		{RuleKey: "5.5-VIP", Threshold: 0.2, GroupID: 3, GroupName: "5.5-VIP"},
+	}, attempt.GrantedGroups)
+	assert.Equal(t, []int64{21}, authCache.userIDs)
+	assert.Empty(t, groupRepo.requestedGroupIDs)
+}
+
 type paymentAutoUnlockGrantCall struct {
 	userID  int64
 	groupID int64
@@ -222,7 +269,9 @@ func (s *paymentAutoUnlockRechargeHistoryRepoStub) SumPositiveBalanceByUser(ctx 
 
 type paymentAutoUnlockGroupRepoStub struct {
 	group             *Group
+	activeGroups      []Group
 	err               error
+	listActiveErr     error
 	requestedGroupIDs []int64
 }
 
@@ -232,6 +281,15 @@ func (s *paymentAutoUnlockGroupRepoStub) GetByID(ctx context.Context, id int64) 
 		return nil, s.err
 	}
 	return s.group, nil
+}
+
+func (s *paymentAutoUnlockGroupRepoStub) ListActive(ctx context.Context) ([]Group, error) {
+	if s.listActiveErr != nil {
+		return nil, s.listActiveErr
+	}
+	out := make([]Group, len(s.activeGroups))
+	copy(out, s.activeGroups)
+	return out, nil
 }
 
 type paymentAutoUnlockAuthCacheInvalidatorStub struct {

@@ -2407,6 +2407,11 @@ export default {
       apiKeys: 'OpenAI API Keys',
       apiKeyCount: '{count} keys',
       apiKeyPlaceholder: 'Enter API Key',
+<<<<<<< HEAD
+      apiKeysPlaceholder: 'One API Key per line',
+      apiKeysPlaceholderKeep: 'Leave empty to keep stored keys; enter values to replace them',
+      apiKeysHint: '{count} keys are currently stored. Values entered here replace stored keys; leave empty to keep them.',
+=======
       apiKeysPlaceholder: 'Add API Keys, one per line. They will be appended on save.',
       apiKeysPlaceholderReplace: 'Replace API Keys, one per line. Stored keys will be replaced on save.',
       apiKeysPlaceholderKeep: 'Add API Keys, one per line. They will be appended on save.',
@@ -2418,14 +2423,18 @@ export default {
       apiKeysModeReplaceHint: 'Replace mode: save replaces all stored keys with input keys.',
       apiKeysReplaceWarning: 'Replace mode',
       apiKeysReplaceNoInput: 'Replace mode requires at least 1 API Key',
+>>>>>>> origin/main
       apiKeyPlaceholderKeep: 'Leave empty to keep current key',
       apiKeyWillClear: 'Configured key will be cleared on save',
       apiKeyConfigured: 'Configured',
       apiKeyTemporary: 'Pending',
+<<<<<<< HEAD
+=======
       apiKeyPendingDelete: 'Pending delete',
       apiKeyPendingDeleteCount: '{count} keys pending deletion',
       deleteApiKey: 'Delete this key',
       undoDeleteApiKey: 'Undo delete',
+>>>>>>> origin/main
       inputApiKeyCount: '{count} keys in input',
       storedApiKeyCount: '{count} stored keys',
       testInputApiKeys: 'Test input keys',
@@ -2436,12 +2445,17 @@ export default {
       apiKeyTestDone: 'Key test completed for {count} keys',
       apiKeyTestFailed: 'Failed to test OpenAI API Keys',
       apiKeyHealth: 'Key Availability',
+<<<<<<< HEAD
+      apiKeyFreezeRule: 'Three consecutive failures freeze a key for 1 minute; moderation rotation skips frozen keys.',
+      apiKeyRows: '{count} keys',
+=======
       apiKeyFreezeRule: '400 does not freeze; 401/403 freeze for 10 minutes; 429/529 freeze for 1 minute; other HTTP errors freeze for 10 seconds.',
       apiKeyRows: '{count} keys',
       apiKeyRowsCollapsed: '{count} keys hidden',
       apiKeyRowsExpanded: 'Showing all {count} keys',
       expandApiKeyRows: 'Expand',
       collapseApiKeyRows: 'Collapse',
+>>>>>>> origin/main
       apiKeyHealthEmpty: 'No key status yet',
       apiKeyHealthEmptyHint: 'Save keys or test input keys to see availability.',
       apiKeyStatusOk: 'Available',
@@ -2458,7 +2472,11 @@ export default {
       auditTestInputHint: 'Enter a prompt and upload or paste images; images are sent as base64 and are not stored.',
       auditTestPromptPlaceholder: 'Enter a user prompt to test; leave empty to only test key availability.',
       auditTestImages: 'Test Images',
+<<<<<<< HEAD
+      auditTestImagesHint: 'Upload, drag, or paste images. Up to 4 images, 8MB each.',
+=======
       auditTestImagesHint: 'Upload, drag, or paste images. Up to 1 image, 8MB each.',
+>>>>>>> origin/main
       addAuditTestImage: 'Add image',
       clearAuditTest: 'Clear test',
       auditTestImageLimit: 'You can add up to {count} test images',

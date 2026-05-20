@@ -284,12 +284,15 @@ type PublicSettings struct {
 
 	// 风控中心功能开关
 	RiskControlEnabled bool `json:"risk_control_enabled"`
+<<<<<<< HEAD
+=======
 }
 
 type LoginAgreementDocument struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
 	ContentMD string `json:"content_md"`
+>>>>>>> origin/main
 }
 
 type WeChatConnectOAuthConfig struct {

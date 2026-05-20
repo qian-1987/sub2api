@@ -187,6 +187,8 @@ func (r *contentModerationTestUserRepo) UpdateConcurrency(ctx context.Context, i
 	panic("unexpected UpdateConcurrency call")
 }
 
+<<<<<<< HEAD
+=======
 func (r *contentModerationTestUserRepo) BatchSetConcurrency(ctx context.Context, userIDs []int64, value int) (int, error) {
 	panic("unexpected BatchSetConcurrency call")
 }
@@ -195,6 +197,7 @@ func (r *contentModerationTestUserRepo) BatchAddConcurrency(ctx context.Context,
 	panic("unexpected BatchAddConcurrency call")
 }
 
+>>>>>>> origin/main
 func (r *contentModerationTestUserRepo) ExistsByEmail(ctx context.Context, email string) (bool, error) {
 	panic("unexpected ExistsByEmail call")
 }
@@ -301,14 +304,21 @@ func TestBuildContentModerationLog_RedactsInputExcerpt(t *testing.T) {
 }
 
 func TestRedactContentModerationSecrets_LongHexAndTokens(t *testing.T) {
+<<<<<<< HEAD
+	input := "你哈市多大事cf5bbdc4cd508f3aaf0d2070d529d4a4ac29099f8ecc357f696df28e1df91554 token=abc123456789xyz Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturepart"
+=======
 	input := "你哈市多大事cf5bbdc4cd508f3aaf0d2070d529d4a4ac29099f8ecc357f696df28e1df91554 token=abc123456789xyz Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturepart https://example.com/private/path?token=abc123"
+>>>>>>> origin/main
 
 	out := redactContentModerationSecrets(input)
 
 	require.NotContains(t, out, "cf5bbdc4cd508f3aaf0d2070d529d4a4ac29099f8ecc357f696df28e1df91554")
 	require.NotContains(t, out, "abc123456789xyz")
 	require.NotContains(t, out, "eyJhbGciOiJIUzI1NiJ9")
+<<<<<<< HEAD
+=======
 	require.NotContains(t, out, "https://example.com/private/path")
+>>>>>>> origin/main
 	require.Contains(t, out, "[已脱敏]")
 }
 
@@ -321,6 +331,8 @@ func TestContentModerationConfigNormalize_NonHitRetentionMaxThreeDays(t *testing
 	require.Equal(t, 3, cfg.NonHitRetentionDays)
 }
 
+<<<<<<< HEAD
+=======
 func TestContentModerationUpdateConfig_AppendsAndDeletesAPIKeys(t *testing.T) {
 	cfg := defaultContentModerationConfig()
 	cfg.APIKeys = []string{"sk-old-a", "sk-old-b"}
@@ -376,6 +388,7 @@ func TestContentModerationUpdateConfig_ReplacesAPIKeysWhenRequested(t *testing.T
 	require.Equal(t, []string{"sk-new-only"}, saved.apiKeys())
 }
 
+>>>>>>> origin/main
 func TestExtractContentModerationInput_AnthropicImageSourceOnlyParticipatesInMemory(t *testing.T) {
 	body := []byte(`{
 		"messages": [
@@ -451,6 +464,8 @@ func TestExtractContentModerationInput_OpenAIImagesIncludesPromptAndImages(t *te
 	require.Equal(t, []string{"https://example.com/source.png", "data:image/png;base64,aGVsbG8="}, input.Images)
 }
 
+<<<<<<< HEAD
+=======
 func TestContentModerationInput_NormalizeKeepsImagesAndModerationInputSamplesOneImage(t *testing.T) {
 	images := []string{
 		"data:image/png;base64,Zmlyc3Q=",
@@ -483,6 +498,7 @@ func TestBuildModerationTestInputRejectsMultipleImages(t *testing.T) {
 	require.Contains(t, err.Error(), "最多上传 1 张测试图片")
 }
 
+>>>>>>> origin/main
 func TestExtractContentModerationInput_OpenAIResponsesCodexPayloadUsesLastUserMessage(t *testing.T) {
 	body := []byte(`{
 		"model":"gpt-5.5",
@@ -650,6 +666,8 @@ func TestBuildContentModerationTestAuditResult_UsesConfiguredThresholdsOnly(t *t
 	require.Equal(t, 0.98, result.Thresholds["harassment"])
 }
 
+<<<<<<< HEAD
+=======
 func TestContentModerationCallModeration_400DoesNotFreezeAPIKey(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -749,6 +767,7 @@ func TestContentModerationTestAPIKeys_400DoesNotFreezeAPIKey(t *testing.T) {
 	require.Nil(t, result.Items[0].FrozenUntil)
 }
 
+>>>>>>> origin/main
 func TestContentModerationCheck_PreHashUsesRedisHashCache(t *testing.T) {
 	cfg := defaultContentModerationConfig()
 	cfg.Enabled = true
