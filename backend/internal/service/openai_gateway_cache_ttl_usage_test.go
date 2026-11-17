@@ -21,7 +21,6 @@ func TestOpenAICacheTTLUsageHTTPAndBridge(t *testing.T) {
 	require.Equal(t, 7000, usage.CacheCreationInputTokens)
 	require.Equal(t, 3000, usage.CacheCreation30mInputTokens)
 	require.Equal(t, 4000, usage.CacheCreation12hInputTokens)
-	require.True(t, usage.CacheCreationBreakdownPresent)
 	require.Equal(t, 1000, usage.InputTokens-usage.CacheReadInputTokens-usage.CacheCreationInputTokens)
 
 	var bridged apicompat.ResponsesUsage
@@ -62,10 +61,8 @@ func TestOpenAICacheTTLUsageProgressiveAggregateClearsStaleBuckets(t *testing.T)
 	require.Equal(t, 8000, usage.CacheCreationInputTokens)
 	require.Zero(t, usage.CacheCreation30mInputTokens)
 	require.Zero(t, usage.CacheCreation12hInputTokens)
-	require.False(t, usage.CacheCreationBreakdownPresent)
 	svc.parseSSEUsage(`{"type":"response.in_progress","usage":{"input_tokens_details":{"cache_write_tokens":0,"cache_write_tokens_details":{"ttl_30m_tokens":0,"ttl_12h_tokens":0}}}}`, &usage)
 	require.Zero(t, usage.CacheCreationInputTokens)
-	require.True(t, usage.CacheCreationBreakdownPresent)
 }
 
 func TestOpenAICacheTTLUsageRecordUsagePersistsAndBillsDisjointBuckets(t *testing.T) {
@@ -85,8 +82,10 @@ func TestOpenAICacheTTLUsageRecordUsagePersistsAndBillsDisjointBuckets(t *testin
 	require.NotNil(t, log)
 	require.Equal(t, 1000, log.InputTokens)
 	require.Equal(t, 7000, log.CacheCreationTokens)
-	require.Equal(t, 3000, log.CacheCreation5mTokens) // OpenAI compatibility slot: 30m.
-	require.Equal(t, 4000, log.CacheCreation1hTokens) // OpenAI compatibility slot: 12h.
+	require.Equal(t, 3000, log.CacheCreation30mTokens)
+	require.Equal(t, 4000, log.CacheCreation12hTokens)
+	require.Zero(t, log.CacheCreation5mTokens)
+	require.Zero(t, log.CacheCreation1hTokens)
 	require.Equal(t, 12010, log.TotalTokens())
 	require.InDelta(t, .001, log.InputCost, 1e-12)
 	require.InDelta(t, .01375, log.CacheCreationCost, 1e-12)
@@ -114,7 +113,6 @@ func TestOpenAICacheTTLUsageExplicitZeroClearsProgressiveWrites(t *testing.T) {
 				require.Zero(t, usage.CacheCreationInputTokens)
 				require.Zero(t, usage.CacheCreation30mInputTokens)
 				require.Zero(t, usage.CacheCreation12hInputTokens)
-				require.False(t, usage.CacheCreationBreakdownPresent)
 				require.Equal(t, 12000, usage.InputTokens)
 				require.Equal(t, 10, usage.OutputTokens)
 			})

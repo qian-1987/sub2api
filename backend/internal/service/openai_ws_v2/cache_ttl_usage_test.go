@@ -16,7 +16,6 @@ func TestRelayCacheTTLUsageSnapshotsAndTurns(t *testing.T) {
 	require.Equal(t, 7000, turn.CacheCreationInputTokens)
 	require.Equal(t, 3000, turn.CacheCreation30mInputTokens)
 	require.Equal(t, 4000, turn.CacheCreation12hInputTokens)
-	require.True(t, turn.CacheCreationBreakdownPresent)
 	require.Equal(t, turn, state.usage)
 
 	shortOnly := []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":8000,"output_tokens":10,"input_tokens_details":{"cache_write_tokens":7000,"cache_write_tokens_details":{"ttl_30m_tokens":7000,"ttl_12h_tokens":0}}}}}`)
@@ -41,7 +40,6 @@ func TestRelayCacheTTLUsageExplicitZeroClearsProgressiveWrites(t *testing.T) {
 			require.Zero(t, turn.CacheCreationInputTokens)
 			require.Zero(t, turn.CacheCreation30mInputTokens)
 			require.Zero(t, turn.CacheCreation12hInputTokens)
-			require.False(t, turn.CacheCreationBreakdownPresent)
 			require.Equal(t, 12000, turn.InputTokens)
 		})
 	}

@@ -7,6 +7,11 @@ package apicompat
 import (
 	"bytes"
 	"encoding/json"
+	"math"
+	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/tidwall/gjson"
 )
 
 // ---------------------------------------------------------------------------
@@ -514,28 +519,15 @@ type ResponsesUsage struct {
 
 func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	type responsesUsageAlias ResponsesUsage
-	type cacheTokenPresence struct {
-		CacheCreationTokens *int `json:"cache_creation_tokens"`
-		CacheWriteTokens    *int `json:"cache_write_tokens"`
-	}
 	var aux struct {
 		responsesUsageAlias
-		PromptTokens            int                           `json:"prompt_tokens"`
-		CompletionTokens        int                           `json:"completion_tokens"`
-		CacheCreationTokens     int                           `json:"cache_creation_tokens"`
-		CacheWriteInputTokens   int                           `json:"cache_write_input_tokens"`
-		CacheWriteTokens        int                           `json:"cache_write_tokens"`
-		PromptTokensDetails     *ResponsesInputTokensDetails  `json:"prompt_tokens_details,omitempty"`
-		CompletionTokensDetails *ResponsesOutputTokensDetails `json:"completion_tokens_details,omitempty"`
+		CacheCreationInputTokens json.RawMessage               `json:"cache_creation_input_tokens"`
+		PromptTokens             int                           `json:"prompt_tokens"`
+		CompletionTokens         int                           `json:"completion_tokens"`
+		PromptTokensDetails      *ResponsesInputTokensDetails  `json:"prompt_tokens_details,omitempty"`
+		CompletionTokensDetails  *ResponsesOutputTokensDetails `json:"completion_tokens_details,omitempty"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	var nestedPresence struct {
-		InputTokensDetails  *cacheTokenPresence `json:"input_tokens_details"`
-		PromptTokensDetails *cacheTokenPresence `json:"prompt_tokens_details"`
-	}
-	if err := json.Unmarshal(data, &nestedPresence); err != nil {
 		return err
 	}
 	*u = ResponsesUsage(aux.responsesUsageAlias)
@@ -545,35 +537,37 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	if u.OutputTokens == 0 && aux.CompletionTokens != 0 {
 		u.OutputTokens = aux.CompletionTokens
 	}
-	if u.CacheCreationInputTokens == 0 {
-		switch {
-		case aux.CacheWriteInputTokens > 0:
-			u.CacheCreationInputTokens = aux.CacheWriteInputTokens
-		case aux.CacheCreationTokens > 0:
-			u.CacheCreationInputTokens = aux.CacheCreationTokens
-		case aux.CacheWriteTokens > 0:
-			u.CacheCreationInputTokens = aux.CacheWriteTokens
-		}
-	}
 	if u.InputTokensDetails == nil && aux.PromptTokensDetails != nil {
 		u.InputTokensDetails = aux.PromptTokensDetails
 	}
 	if u.OutputTokensDetails == nil && aux.CompletionTokensDetails != nil {
 		u.OutputTokensDetails = aux.CompletionTokensDetails
 	}
-	var canonicalCacheCreationTokens *int
-	switch {
-	case nestedPresence.InputTokensDetails != nil && nestedPresence.InputTokensDetails.CacheWriteTokens != nil:
-		canonicalCacheCreationTokens = nestedPresence.InputTokensDetails.CacheWriteTokens
-	case nestedPresence.PromptTokensDetails != nil && nestedPresence.PromptTokensDetails.CacheWriteTokens != nil:
-		canonicalCacheCreationTokens = nestedPresence.PromptTokensDetails.CacheWriteTokens
-	case nestedPresence.InputTokensDetails != nil && nestedPresence.InputTokensDetails.CacheCreationTokens != nil:
-		canonicalCacheCreationTokens = nestedPresence.InputTokensDetails.CacheCreationTokens
-	case nestedPresence.PromptTokensDetails != nil && nestedPresence.PromptTokensDetails.CacheCreationTokens != nil:
-		canonicalCacheCreationTokens = nestedPresence.PromptTokensDetails.CacheCreationTokens
+	usageJSON := gjson.ParseBytes(data)
+	u.CacheCreationInputTokens = cacheCreationAggregateFromResponsesUsage(usageJSON)
+	if u.InputTokensDetails != nil {
+		// Only the globally selected aggregate can carry authoritative zero.
+		u.InputTokensDetails.cacheWriteTokensExplicitZero = false
+		u.InputTokensDetails.cacheCreationTokensExplicitZero = false
 	}
-	if canonicalCacheCreationTokens != nil {
-		u.CacheCreationInputTokens = max(*canonicalCacheCreationTokens, 0)
+	if openai.CacheWriteAggregateExplicitZero(usageJSON, u.CacheCreationInputTokens) {
+		if u.InputTokensDetails == nil {
+			u.InputTokensDetails = &ResponsesInputTokensDetails{}
+		}
+		// A canonical nested field conveys the same zero to Chat, including
+		// when the upstream reported it using a top-level compatibility alias.
+		selected := firstPresentCacheCreationField(usageJSON)
+		if strings.Contains(selected, "cache_creation") {
+			u.InputTokensDetails.cacheCreationTokensExplicitZero = true
+		} else {
+			u.InputTokensDetails.cacheWriteTokensExplicitZero = true
+		}
+	}
+	if u.InputTokensDetails != nil && u.InputTokensDetails.CacheWriteTokensDetails == nil &&
+		aux.PromptTokensDetails != nil && !usageJSON.Get("input_tokens_details.cache_write_tokens_details").Exists() {
+		// Some compatible responses put cache details on prompt_tokens_details
+		// while retaining unrelated input_tokens_details fields.
+		u.InputTokensDetails.CacheWriteTokensDetails = aux.PromptTokensDetails.CacheWriteTokensDetails
 	}
 	if u.TotalTokens == 0 && (u.InputTokens != 0 || u.OutputTokens != 0) {
 		u.TotalTokens = u.InputTokens + u.OutputTokens
@@ -581,12 +575,152 @@ func (u *ResponsesUsage) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+var nestedCacheCreationFields = [...]string{
+	"input_tokens_details.cache_write_tokens", "prompt_tokens_details.cache_write_tokens",
+	"input_tokens_details.cache_creation_tokens", "prompt_tokens_details.cache_creation_tokens",
+}
+
+var topLevelCacheCreationFields = [...]string{
+	"cache_write_tokens", "cache_creation_input_tokens", "cache_write_input_tokens", "cache_creation_tokens",
+}
+
+// Match the gateway's raw Responses usage parser: the first present nested
+// field wins (even null), otherwise the first positive top-level value wins.
+func cacheCreationAggregateFromResponsesUsage(usage gjson.Result) int {
+	for _, path := range nestedCacheCreationFields {
+		if value := usage.Get(path); value.Exists() {
+			return max(int(value.Int()), 0)
+		}
+	}
+	for _, path := range topLevelCacheCreationFields {
+		if value := usage.Get(path); value.Exists() {
+			if n := int(value.Int()); n > 0 {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+func firstPresentCacheCreationField(usage gjson.Result) string {
+	for _, path := range nestedCacheCreationFields {
+		if usage.Get(path).Exists() {
+			return path
+		}
+	}
+	for _, path := range topLevelCacheCreationFields {
+		if usage.Get(path).Exists() {
+			return path
+		}
+	}
+	return ""
+}
+
 // ResponsesInputTokensDetails breaks down input token usage.
 type ResponsesInputTokensDetails struct {
-	CachedTokens        int `json:"cached_tokens,omitempty"`
-	AudioTokens         int `json:"audio_tokens,omitempty"`
-	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
-	CacheWriteTokens    int `json:"cache_write_tokens,omitempty"`
+	cacheWriteTokensExplicitZero    bool
+	cacheCreationTokensExplicitZero bool
+	CachedTokens                    int                             `json:"cached_tokens,omitempty"`
+	AudioTokens                     int                             `json:"audio_tokens,omitempty"`
+	CacheCreationTokens             int                             `json:"cache_creation_tokens,omitempty"`
+	CacheWriteTokens                int                             `json:"cache_write_tokens,omitempty"`
+	CacheWriteTokensDetails         *openai.CacheWriteTokensDetails `json:"cache_write_tokens_details,omitempty"`
+}
+
+// Treat an invalid optional breakdown as absent rather than rejecting an
+// otherwise valid upstream usage response.
+func (d *ResponsesInputTokensDetails) UnmarshalJSON(data []byte) error {
+	type detailsAlias ResponsesInputTokensDetails
+	var value struct {
+		detailsAlias
+		CacheCreationTokens     json.RawMessage `json:"cache_creation_tokens"`
+		CacheWriteTokens        json.RawMessage `json:"cache_write_tokens"`
+		CacheWriteTokensDetails json.RawMessage `json:"cache_write_tokens_details"`
+	}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*d = ResponsesInputTokensDetails(value.detailsAlias)
+	d.CacheWriteTokensDetails = parseOptionalCacheWriteTokensDetails(value.CacheWriteTokensDetails)
+	raw := gjson.ParseBytes(data)
+	write, creation := raw.Get("cache_write_tokens"), raw.Get("cache_creation_tokens")
+	d.CacheWriteTokens = int(write.Int())
+	d.CacheCreationTokens = int(creation.Int())
+	d.cacheWriteTokensExplicitZero = cacheFieldIsExplicitZero(write)
+	d.cacheCreationTokensExplicitZero = cacheFieldIsExplicitZero(creation)
+	return nil
+}
+
+func cacheFieldIsExplicitZero(value gjson.Result) bool {
+	if value.Type != gjson.Number {
+		return false
+	}
+	// Reuse the gateway's exact-zero policy (including exponent/underflow
+	// handling) without interpreting absent or non-number fields as zero.
+	return openai.CacheWriteAggregateExplicitZero(gjson.Parse(`{"cache_write_tokens":`+value.Raw+`}`), 0)
+}
+
+// MarshalJSON preserves authoritative zero counts while leaving absent
+// aggregates absent. This lets the next streaming parser distinguish them.
+func (d ResponsesInputTokensDetails) MarshalJSON() ([]byte, error) {
+	type detailsAlias ResponsesInputTokensDetails
+	return json.Marshal(struct {
+		detailsAlias
+		CacheCreationTokens *int `json:"cache_creation_tokens,omitempty"`
+		CacheWriteTokens    *int `json:"cache_write_tokens,omitempty"`
+	}{
+		detailsAlias:        detailsAlias(d),
+		CacheCreationTokens: optionalExplicitInt(d.CacheCreationTokens, d.cacheCreationTokensExplicitZero),
+		CacheWriteTokens:    optionalExplicitInt(d.CacheWriteTokens, d.cacheWriteTokensExplicitZero),
+	})
+}
+
+func optionalExplicitInt(value int, explicitZero bool) *int {
+	if value == 0 && !explicitZero {
+		return nil
+	}
+	return &value
+}
+
+func parseOptionalCacheWriteTokensDetails(raw json.RawMessage) *openai.CacheWriteTokensDetails {
+	if len(raw) == 0 {
+		return nil
+	}
+	value := gjson.ParseBytes(raw)
+	if !value.IsObject() {
+		return nil
+	}
+	short, shortOK := parseOptionalCacheTokenCount(value.Get("ttl_30m_tokens"))
+	long, longOK := parseOptionalCacheTokenCount(value.Get("ttl_12h_tokens"))
+	if !shortOK || !longOK {
+		return nil
+	}
+	return &openai.CacheWriteTokensDetails{TTL30mTokens: short, TTL12hTokens: long}
+}
+
+func parseOptionalCacheTokenCount(value gjson.Result) (*int, bool) {
+	if !value.Exists() || value.Type == gjson.Null {
+		return nil, true
+	}
+	if value.Type != gjson.Number {
+		return nil, false
+	}
+	count, err := json.Number(value.Raw).Int64()
+	if err != nil {
+		// Accept integral JSON decimals (e.g. 3.0) as the raw usage parser does,
+		// while rejecting fractions and values not exactly representable.
+		f, parseErr := json.Number(value.Raw).Float64()
+		const maxExactInteger = float64(1<<53 - 1)
+		if parseErr != nil || math.IsNaN(f) || math.IsInf(f, 0) || math.Trunc(f) != f || f > maxExactInteger || f < -maxExactInteger {
+			return nil, false
+		}
+		count = int64(f)
+	}
+	if int64(int(count)) != count {
+		return nil, false
+	}
+	result := int(count)
+	return &result, true
 }
 
 // ResponsesOutputTokensDetails breaks down output token usage.
@@ -795,13 +929,47 @@ type ChatUsage struct {
 //   - completion_tokens_details: reasoning_tokens, audio_tokens,
 //     accepted_prediction_tokens, rejected_prediction_tokens
 type ChatTokenDetails struct {
-	CachedTokens             int `json:"cached_tokens,omitempty"`
-	AudioTokens              int `json:"audio_tokens,omitempty"`
-	CacheCreationTokens      int `json:"cache_creation_tokens,omitempty"`
-	CacheWriteTokens         int `json:"cache_write_tokens,omitempty"`
-	ReasoningTokens          int `json:"reasoning_tokens,omitempty"`
-	AcceptedPredictionTokens int `json:"accepted_prediction_tokens,omitempty"`
-	RejectedPredictionTokens int `json:"rejected_prediction_tokens,omitempty"`
+	cacheWriteTokensExplicitZero    bool
+	cacheCreationTokensExplicitZero bool
+	CachedTokens                    int                             `json:"cached_tokens,omitempty"`
+	AudioTokens                     int                             `json:"audio_tokens,omitempty"`
+	CacheCreationTokens             int                             `json:"cache_creation_tokens,omitempty"`
+	CacheWriteTokens                int                             `json:"cache_write_tokens,omitempty"`
+	CacheWriteTokensDetails         *openai.CacheWriteTokensDetails `json:"cache_write_tokens_details,omitempty"`
+	ReasoningTokens                 int                             `json:"reasoning_tokens,omitempty"`
+	AcceptedPredictionTokens        int                             `json:"accepted_prediction_tokens,omitempty"`
+	RejectedPredictionTokens        int                             `json:"rejected_prediction_tokens,omitempty"`
+}
+
+func (d *ChatTokenDetails) UnmarshalJSON(data []byte) error {
+	type detailsAlias ChatTokenDetails
+	var value struct {
+		detailsAlias
+		CacheWriteTokensDetails json.RawMessage `json:"cache_write_tokens_details"`
+	}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*d = ChatTokenDetails(value.detailsAlias)
+	d.CacheWriteTokensDetails = parseOptionalCacheWriteTokensDetails(value.CacheWriteTokensDetails)
+	raw := gjson.ParseBytes(data)
+	write, creation := raw.Get("cache_write_tokens"), raw.Get("cache_creation_tokens")
+	d.cacheWriteTokensExplicitZero = cacheFieldIsExplicitZero(write)
+	d.cacheCreationTokensExplicitZero = cacheFieldIsExplicitZero(creation)
+	return nil
+}
+
+func (d ChatTokenDetails) MarshalJSON() ([]byte, error) {
+	type detailsAlias ChatTokenDetails
+	return json.Marshal(struct {
+		detailsAlias
+		CacheCreationTokens *int `json:"cache_creation_tokens,omitempty"`
+		CacheWriteTokens    *int `json:"cache_write_tokens,omitempty"`
+	}{
+		detailsAlias:        detailsAlias(d),
+		CacheCreationTokens: optionalExplicitInt(d.CacheCreationTokens, d.cacheCreationTokensExplicitZero),
+		CacheWriteTokens:    optionalExplicitInt(d.CacheWriteTokens, d.cacheWriteTokensExplicitZero),
+	})
 }
 
 // ChatCompletionsChunk is a single streaming chunk from POST /v1/chat/completions.

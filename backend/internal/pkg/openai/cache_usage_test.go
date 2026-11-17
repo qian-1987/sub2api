@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -51,5 +52,53 @@ func TestCacheWriteBreakdownFromUsageExplicitZeroPresence(t *testing.T) {
 		{`{"input_tokens_details":{"cache_write_tokens":"0"}}`, false},
 	} {
 		require.Equal(t, tt.want, CacheWriteAggregateExplicitZero(gjson.Parse(tt.body), 0), tt.body)
+	}
+}
+
+func TestCacheWriteAggregateExplicitZeroAliasesAndNumbers(t *testing.T) {
+	aliases := []string{
+		`{"input_tokens_details":{"cache_write_tokens":%s}}`,
+		`{"prompt_tokens_details":{"cache_write_tokens":%s}}`,
+		`{"input_tokens_details":{"cache_creation_tokens":%s}}`,
+		`{"prompt_tokens_details":{"cache_creation_tokens":%s}}`,
+		`{"cache_write_tokens":%s}`,
+		`{"cache_creation_input_tokens":%s}`,
+		`{"cache_write_input_tokens":%s}`,
+		`{"cache_creation_tokens":%s}`,
+	}
+	values := []struct {
+		raw  string
+		want bool
+	}{
+		{"0", true}, {"-0", true}, {"0.0", true}, {"-0.000e+999", true}, {"0e-999", true},
+		{"1e-999", false}, {"-1e-999", false}, {"0.0001e-999", false}, {"1", false},
+		{"-1", false}, {"null", false}, {`"0"`, false}, {"false", false},
+	}
+	for alias, template := range aliases {
+		for _, value := range values {
+			t.Run(fmt.Sprintf("alias-%d/%s", alias, value.raw), func(t *testing.T) {
+				body := fmt.Sprintf(template, value.raw)
+				require.Equal(t, value.want, CacheWriteAggregateExplicitZero(gjson.Parse(body), 0), body)
+			})
+		}
+	}
+}
+
+func TestCacheWriteAggregateExplicitZeroPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		body  string
+		total int
+		want  bool
+	}{
+		{"absent", `{}`, 0, false},
+		{"nested zero takes precedence", `{"input_tokens_details":{"cache_creation_tokens":0},"cache_write_tokens":7}`, 0, true},
+		{"positive aggregate wins over top zero", `{"cache_write_tokens":0,"cache_creation_input_tokens":7}`, 7, false},
+		{"invalid higher nested field", `{"input_tokens_details":{"cache_creation_tokens":null},"cache_write_tokens":0}`, 0, false},
+		{"invalid higher top field", `{"cache_write_tokens":"0","cache_creation_input_tokens":0}`, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, CacheWriteAggregateExplicitZero(gjson.Parse(tc.body), tc.total))
+		})
 	}
 }

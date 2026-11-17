@@ -15,6 +15,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/tidwall/gjson"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
 
@@ -25,12 +26,14 @@ type FrameConn interface {
 }
 
 type Usage struct {
-	InputTokens              int
-	ImageInputTokens         int
-	OutputTokens             int
-	CacheCreationInputTokens int
-	CacheReadInputTokens     int
-	ImageOutputTokens        int
+	InputTokens                 int
+	ImageInputTokens            int
+	OutputTokens                int
+	CacheCreationInputTokens    int
+	CacheCreation30mInputTokens int
+	CacheCreation12hInputTokens int
+	CacheReadInputTokens        int
+	ImageOutputTokens           int
 }
 
 type RelayResult struct {
@@ -1155,21 +1158,35 @@ func parseUsageAndAccumulate(
 			int64(inputTokens), int64(outputTokens), usageResult.Get("total_tokens").Int(), reasoningTokens,
 		))
 	}
+	cacheCreationTokens := openAICacheCreationTokensFromUsage(usageResult)
+	breakdownTotal, cache30m, cache12h, validBreakdown := openai.CacheWriteBreakdownFromUsage(usageResult, cacheCreationTokens)
+	if !validBreakdown || breakdownTotal != cacheCreationTokens {
+		// Match the main Responses gateway: a missing/inconsistent aggregate
+		// cannot be inferred from the TTL buckets.
+		cache30m, cache12h = 0, 0
+	}
 	parsedUsage := Usage{
-		InputTokens:              inputTokens,
-		ImageInputTokens:         int(imageInputTokens),
-		OutputTokens:             outputTokens,
-		CacheCreationInputTokens: openAICacheCreationTokensFromUsage(usageResult),
-		CacheReadInputTokens:     cachedTokens,
-		ImageOutputTokens:        int(imageTokens),
+		InputTokens:                 inputTokens,
+		ImageInputTokens:            int(imageInputTokens),
+		OutputTokens:                outputTokens,
+		CacheCreationInputTokens:    cacheCreationTokens,
+		CacheCreation30mInputTokens: cache30m,
+		CacheCreation12hInputTokens: cache12h,
+		CacheReadInputTokens:        cachedTokens,
+		ImageOutputTokens:           int(imageTokens),
 	}
 
 	if isTerminalEvent(strings.TrimSpace(eventType)) {
 		if relayUsageHasTokens(parsedUsage) || !relayUsageHasTokens(state.turnUsage) {
 			state.turnUsage = parsedUsage
+		} else if openai.CacheWriteAggregateExplicitZero(usageResult, parsedUsage.CacheCreationInputTokens) {
+			clearRelayCacheCreation(&state.turnUsage)
 		}
 	} else {
 		mergeRelayUsageNonZero(&state.turnUsage, parsedUsage)
+		if openai.CacheWriteAggregateExplicitZero(usageResult, parsedUsage.CacheCreationInputTokens) {
+			clearRelayCacheCreation(&state.turnUsage)
+		}
 		return Usage{}
 	}
 	return parsedUsage
@@ -1193,6 +1210,8 @@ func mergeRelayUsageNonZero(dst *Usage, src Usage) {
 	}
 	if src.CacheCreationInputTokens > 0 {
 		dst.CacheCreationInputTokens = src.CacheCreationInputTokens
+		dst.CacheCreation30mInputTokens = src.CacheCreation30mInputTokens
+		dst.CacheCreation12hInputTokens = src.CacheCreation12hInputTokens
 	}
 	if src.CacheReadInputTokens > 0 {
 		dst.CacheReadInputTokens = src.CacheReadInputTokens
@@ -1214,10 +1233,18 @@ func finalizeRelayTurnUsage(state *relayState) Usage {
 	state.usage.ImageInputTokens += turnUsage.ImageInputTokens
 	state.usage.OutputTokens += turnUsage.OutputTokens
 	state.usage.CacheCreationInputTokens += turnUsage.CacheCreationInputTokens
+	state.usage.CacheCreation30mInputTokens += turnUsage.CacheCreation30mInputTokens
+	state.usage.CacheCreation12hInputTokens += turnUsage.CacheCreation12hInputTokens
 	state.usage.CacheReadInputTokens += turnUsage.CacheReadInputTokens
 	state.usage.ImageOutputTokens += turnUsage.ImageOutputTokens
 	state.turnUsage = Usage{}
 	return turnUsage
+}
+
+func clearRelayCacheCreation(usage *Usage) {
+	usage.CacheCreationInputTokens = 0
+	usage.CacheCreation30mInputTokens = 0
+	usage.CacheCreation12hInputTokens = 0
 }
 
 func parseUsageIntField(value gjson.Result, required bool) (int, bool) {

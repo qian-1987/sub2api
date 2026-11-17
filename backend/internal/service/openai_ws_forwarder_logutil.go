@@ -202,15 +202,8 @@ func parseOpenAIWSResponseUsageFromCompletedEvent(message []byte, usage *OpenAIU
 	if usage == nil || len(message) == 0 || !bytes.Contains(message, []byte(`"usage"`)) {
 		return
 	}
-	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(message); ok {
-		if openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(message, "")) {
-			if !openAIUsageHasTokens(&parsedUsage) && openAIUsageHasTokens(usage) {
-				return
-			}
-			*usage = parsedUsage
-		} else {
-			mergeOpenAIUsageNonZero(usage, parsedUsage)
-		}
+	if parsedUsage, usageValue, ok := extractOpenAIUsageValueFromJSONBytes(message); ok {
+		mergeOpenAIStreamUsage(usage, parsedUsage, usageValue, openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(message, "")))
 	}
 }
 

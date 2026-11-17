@@ -19,6 +19,21 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+// Convert both per-turn and cumulative relay usage through the same mapping so
+// the cache TTL buckets cannot be dropped before billing.
+func openAIWSV2UsageFromRelay(usage openaiwsv2.Usage) OpenAIUsage {
+	return OpenAIUsage{
+		InputTokens:                 usage.InputTokens,
+		ImageInputTokens:            usage.ImageInputTokens,
+		OutputTokens:                usage.OutputTokens,
+		CacheCreationInputTokens:    usage.CacheCreationInputTokens,
+		CacheCreation30mInputTokens: usage.CacheCreation30mInputTokens,
+		CacheCreation12hInputTokens: usage.CacheCreation12hInputTokens,
+		CacheReadInputTokens:        usage.CacheReadInputTokens,
+		ImageOutputTokens:           usage.ImageOutputTokens,
+	}
+}
+
 type openAIWSClientFrameConn struct {
 	conn                 *coderws.Conn
 	controlCtx           context.Context
@@ -1205,15 +1220,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				turnRequestModel, turnUpstreamModel := usageMeta.turnModels(turn.RequestModel)
 				turnResult := &OpenAIForwardResult{
-					RequestID: turn.RequestID,
-					Usage: OpenAIUsage{
-						InputTokens:              turn.Usage.InputTokens,
-						ImageInputTokens:         turn.Usage.ImageInputTokens,
-						OutputTokens:             turn.Usage.OutputTokens,
-						CacheCreationInputTokens: turn.Usage.CacheCreationInputTokens,
-						CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
-						ImageOutputTokens:        turn.Usage.ImageOutputTokens,
-					},
+					RequestID:                     turn.RequestID,
+					Usage:                         openAIWSV2UsageFromRelay(turn.Usage),
 					Model:                         turnRequestModel,
 					UpstreamModel:                 openAIWSDifferentModel(turnRequestModel, turnUpstreamModel),
 					UpstreamResponseModel:         turn.ResponseModel,
@@ -1347,15 +1355,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 
 	resultRequestModel, resultUpstreamModel := usageMeta.turnModels(relayResult.RequestModel)
 	result := &OpenAIForwardResult{
-		RequestID: relayResult.RequestID,
-		Usage: OpenAIUsage{
-			InputTokens:              relayResult.Usage.InputTokens,
-			ImageInputTokens:         relayResult.Usage.ImageInputTokens,
-			OutputTokens:             relayResult.Usage.OutputTokens,
-			CacheCreationInputTokens: relayResult.Usage.CacheCreationInputTokens,
-			CacheReadInputTokens:     relayResult.Usage.CacheReadInputTokens,
-			ImageOutputTokens:        relayResult.Usage.ImageOutputTokens,
-		},
+		RequestID:                     relayResult.RequestID,
+		Usage:                         openAIWSV2UsageFromRelay(relayResult.Usage),
 		Model:                         resultRequestModel,
 		UpstreamModel:                 openAIWSDifferentModel(resultRequestModel, resultUpstreamModel),
 		UpstreamResponseModel:         relayResult.ResponseModel,

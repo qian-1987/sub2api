@@ -1,7 +1,9 @@
 package openai
 
 import (
+	"encoding/json"
 	"math"
+	"strings"
 
 	"github.com/tidwall/gjson"
 )
@@ -39,10 +41,30 @@ func CacheWriteAggregateExplicitZero(usage gjson.Result, total int) bool {
 		"cache_write_tokens", "cache_creation_input_tokens", "cache_write_input_tokens", "cache_creation_tokens",
 	} {
 		if value := usage.Get(path); value.Exists() {
-			return value.Type == gjson.Number && value.Float() == 0
+			return cacheWriteNumberIsExactlyZero(value)
 		}
 	}
 	return false
+}
+
+// Check the JSON mantissa rather than a float conversion: values such as
+// 1e-999 underflow to float64 zero but are not mathematically zero.
+func cacheWriteNumberIsExactlyZero(value gjson.Result) bool {
+	if value.Type != gjson.Number || !json.Valid([]byte(value.Raw)) {
+		return false
+	}
+	mantissa := value.Raw
+	if i := strings.IndexAny(mantissa, "eE"); i >= 0 {
+		mantissa = mantissa[:i]
+	}
+	for i := 0; i < len(mantissa); i++ {
+		switch mantissa[i] {
+		case '0', '-', '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // CacheWriteBreakdownFromUsage parses details actually returned by an upstream.

@@ -1545,16 +1545,30 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 		out.TotalTokens = out.InputTokens + out.OutputTokens
 	}
 	if usage.PromptTokensDetails != nil && (usage.PromptTokensDetails.CachedTokens > 0 ||
-		usage.PromptTokensDetails.CacheCreationTokens > 0 || usage.PromptTokensDetails.CacheWriteTokens > 0) {
+		usage.PromptTokensDetails.CacheCreationTokens > 0 || usage.PromptTokensDetails.CacheWriteTokens > 0 || usage.PromptTokensDetails.CacheWriteTokensDetails != nil ||
+		usage.PromptTokensDetails.cacheWriteTokensExplicitZero || usage.PromptTokensDetails.cacheCreationTokensExplicitZero) {
 		out.InputTokensDetails = &ResponsesInputTokensDetails{
-			CachedTokens:        usage.PromptTokensDetails.CachedTokens,
-			CacheCreationTokens: usage.PromptTokensDetails.CacheCreationTokens,
-			CacheWriteTokens:    usage.PromptTokensDetails.CacheWriteTokens,
+			cacheWriteTokensExplicitZero:    usage.PromptTokensDetails.cacheWriteTokensExplicitZero,
+			cacheCreationTokensExplicitZero: usage.PromptTokensDetails.cacheCreationTokensExplicitZero,
+			CachedTokens:                    usage.PromptTokensDetails.CachedTokens,
+			CacheCreationTokens:             usage.PromptTokensDetails.CacheCreationTokens,
+			CacheWriteTokens:                usage.PromptTokensDetails.CacheWriteTokens,
+			CacheWriteTokensDetails:         usage.PromptTokensDetails.CacheWriteTokensDetails,
 		}
-		if usage.PromptTokensDetails.CacheWriteTokens > 0 {
-			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheWriteTokens
-		} else {
-			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheCreationTokens
+		details := usage.PromptTokensDetails
+		switch {
+		case details.CacheWriteTokens > 0:
+			out.CacheCreationInputTokens = details.CacheWriteTokens
+		case details.cacheWriteTokensExplicitZero:
+			// The explicit canonical zero takes precedence over legacy fields.
+		case details.CacheCreationTokens > 0:
+			out.CacheCreationInputTokens = details.CacheCreationTokens
+		}
+		if details.cacheWriteTokensExplicitZero || (details.cacheCreationTokensExplicitZero && details.CacheWriteTokens == 0) {
+			out.InputTokensDetails.CacheCreationTokens = 0
+		}
+		if _, _, ok := details.CacheWriteTokensDetails.Counts(out.CacheCreationInputTokens); !ok {
+			out.InputTokensDetails.CacheWriteTokensDetails = nil
 		}
 	}
 	return out

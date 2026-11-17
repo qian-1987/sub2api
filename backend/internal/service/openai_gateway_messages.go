@@ -1517,6 +1517,8 @@ func copyOpenAIUsageFromResponsesUsage(usage *apicompat.ResponsesUsage) OpenAIUs
 	}
 	if usage.InputTokensDetails != nil {
 		result.CacheReadInputTokens = usage.InputTokensDetails.CachedTokens
+		result.CacheCreation30mInputTokens, result.CacheCreation12hInputTokens, _ =
+			usage.InputTokensDetails.CacheWriteTokensDetails.Counts(usage.CacheCreationInputTokens)
 	}
 	return result
 }

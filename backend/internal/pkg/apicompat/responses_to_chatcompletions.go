@@ -411,6 +411,26 @@ func chatUsageFromResponsesUsage(u *ResponsesUsage) *ChatUsage {
 		TotalTokens:      u.InputTokens + u.OutputTokens,
 	}
 	usage.PromptTokensDetails = promptDetailsFromResponses(u.InputTokensDetails)
+	if details := usage.PromptTokensDetails; details != nil {
+		// Only carry details that agree with the canonical aggregate. In
+		// particular, an explicit zero is omitted in JSON, so a conflicting
+		// positive legacy field would otherwise become billable after decoding.
+		if details.CacheWriteTokens != u.CacheCreationInputTokens {
+			details.CacheWriteTokens = 0
+			details.cacheWriteTokensExplicitZero = false
+		}
+		if details.CacheCreationTokens != u.CacheCreationInputTokens {
+			details.CacheCreationTokens = 0
+			details.cacheCreationTokensExplicitZero = false
+		}
+	}
+	if details := usage.PromptTokensDetails; details != nil && details.CacheWriteTokensDetails != nil {
+		// Do not carry contradictory details across a protocol boundary: an
+		// explicit zero must not become a positive total after omitempty.
+		if _, _, ok := details.CacheWriteTokensDetails.Counts(u.CacheCreationInputTokens); !ok {
+			details.CacheWriteTokensDetails = nil
+		}
+	}
 	if u.CacheCreationInputTokens > 0 {
 		if usage.PromptTokensDetails == nil {
 			usage.PromptTokensDetails = &ChatTokenDetails{}
@@ -430,14 +450,18 @@ func promptDetailsFromResponses(src *ResponsesInputTokensDetails) *ChatTokenDeta
 	if src == nil {
 		return nil
 	}
-	if src.CachedTokens == 0 && src.AudioTokens == 0 && src.CacheCreationTokens == 0 && src.CacheWriteTokens == 0 {
+	if src.CachedTokens == 0 && src.AudioTokens == 0 && src.CacheCreationTokens == 0 && src.CacheWriteTokens == 0 && src.CacheWriteTokensDetails == nil &&
+		!src.cacheWriteTokensExplicitZero && !src.cacheCreationTokensExplicitZero {
 		return nil
 	}
 	return &ChatTokenDetails{
-		CachedTokens:        src.CachedTokens,
-		AudioTokens:         src.AudioTokens,
-		CacheCreationTokens: src.CacheCreationTokens,
-		CacheWriteTokens:    src.CacheWriteTokens,
+		cacheWriteTokensExplicitZero:    src.cacheWriteTokensExplicitZero,
+		cacheCreationTokensExplicitZero: src.cacheCreationTokensExplicitZero,
+		CachedTokens:                    src.CachedTokens,
+		AudioTokens:                     src.AudioTokens,
+		CacheCreationTokens:             src.CacheCreationTokens,
+		CacheWriteTokens:                src.CacheWriteTokens,
+		CacheWriteTokensDetails:         src.CacheWriteTokensDetails,
 	}
 }
 

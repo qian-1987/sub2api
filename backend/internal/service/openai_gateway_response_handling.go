@@ -16,6 +16,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
@@ -1296,24 +1297,35 @@ func (s *OpenAIGatewayService) parseSSEUsageBytesWithType(data []byte, eventType
 	if !bytes.Contains(data, []byte(`"usage"`)) {
 		return
 	}
-	parsedUsage, ok := extractOpenAIUsageFromJSONBytes(data)
+	parsedUsage, usageValue, ok := extractOpenAIUsageValueFromJSONBytes(data)
 	if !ok {
 		return
 	}
-	if openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(data, eventType)) {
-		if !openAIUsageHasTokens(&parsedUsage) && openAIUsageHasTokens(usage) {
-			return
-		}
-		*usage = parsedUsage
-		return
-	}
-	mergeOpenAIUsageNonZero(usage, parsedUsage)
+	mergeOpenAIStreamUsage(usage, parsedUsage, usageValue, openAIStreamEventTypeIsTerminal(effectiveOpenAISSEEventType(data, eventType)))
 }
 
 // Compatible Responses upstreams may report usage before the terminal event.
 // Retain those non-zero fields as a fallback. A terminal usage with any billed
-// tokens is authoritative as a whole; an all-zero terminal does not erase a
-// non-zero progressive observation from the same turn.
+// tokens is authoritative as a whole; an all-zero terminal does not erase
+// non-zero progressive observations except an explicitly zero cache write.
+func mergeOpenAIStreamUsage(dst *OpenAIUsage, src OpenAIUsage, value gjson.Result, terminal bool) {
+	if dst == nil {
+		return
+	}
+	if terminal && (openAIUsageHasTokens(&src) || !openAIUsageHasTokens(dst)) {
+		*dst = src
+		return
+	}
+	if !terminal {
+		mergeOpenAIUsageNonZero(dst, src)
+	}
+	if openai.CacheWriteAggregateExplicitZero(value, src.CacheCreationInputTokens) {
+		dst.CacheCreationInputTokens = 0
+		dst.CacheCreation30mInputTokens = 0
+		dst.CacheCreation12hInputTokens = 0
+	}
+}
+
 func mergeOpenAIUsageNonZero(dst *OpenAIUsage, src OpenAIUsage) {
 	if dst == nil {
 		return
@@ -1411,8 +1423,15 @@ func logOpenAISuccessMissingUsage(ctx context.Context, c *gin.Context, account *
 }
 
 func extractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {
+	usage, _, ok := extractOpenAIUsageValueFromJSONBytes(body)
+	return usage, ok
+}
+
+// extractOpenAIUsageValueFromJSONBytes returns the selected usage object along
+// with the parsed values so streaming callers can distinguish zero from absent.
+func extractOpenAIUsageValueFromJSONBytes(body []byte) (OpenAIUsage, gjson.Result, bool) {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
-		return OpenAIUsage{}, false
+		return OpenAIUsage{}, gjson.Result{}, false
 	}
 	// 部分 OpenAI 兼容上游（例如 Cline API）会将标准响应包在 data 字段中：
 	// {"data":{"choices": [...], "usage": {...}}, "success":true}。
@@ -1428,12 +1447,13 @@ func extractOpenAIUsageFromJSONBytes(body []byte) (OpenAIUsage, bool) {
 		{usagePath: "data.response.usage", imageUsagePath: "data.response.tool_usage.image_gen"},
 	}
 	for _, candidate := range candidates {
-		if usage, ok := openAIUsageFromGJSON(gjson.GetBytes(body, candidate.usagePath)); ok {
+		value := gjson.GetBytes(body, candidate.usagePath)
+		if usage, ok := openAIUsageFromGJSON(value); ok {
 			mergeHostedImageGenToolUsage(gjson.GetBytes(body, candidate.imageUsagePath), &usage)
-			return usage, true
+			return usage, value, true
 		}
 	}
-	return OpenAIUsage{}, false
+	return OpenAIUsage{}, gjson.Result{}, false
 }
 
 // openAIResponsesCompletedEventIsEmpty reports whether a response.completed /
