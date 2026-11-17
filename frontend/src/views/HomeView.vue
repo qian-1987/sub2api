@@ -381,23 +381,7 @@
           </p>
         </div>
 
-        <div class="mb-16 flex flex-wrap items-center justify-center gap-4">
-          <!-- Claude - Supported -->
-          <div
-            class="flex items-center gap-2 rounded-xl border border-primary-200 bg-white/60 px-5 py-3 ring-1 ring-primary-500/20 backdrop-blur-sm dark:border-primary-800 dark:bg-dark-800/60"
-          >
-            <div
-              class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-orange-400 to-orange-500"
-            >
-              <span class="text-xs font-bold text-white">C</span>
-            </div>
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('home.providers.claude') }}</span>
-            <span
-              class="rounded bg-primary-100 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
-              >{{ t('home.providers.supported') }}</span
-            >
-          </div>
-          <!-- GPT - Supported -->
+        <div class="mb-16 flex flex-col items-center gap-5">
           <div
             class="flex items-center gap-2 rounded-xl border border-primary-200 bg-white/60 px-5 py-3 ring-1 ring-primary-500/20 backdrop-blur-sm dark:border-primary-800 dark:bg-dark-800/60"
           >
@@ -406,56 +390,27 @@
             >
               <span class="text-xs font-bold text-white">G</span>
             </div>
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">GPT</span>
+            <span class="text-sm font-medium uppercase tracking-[0.18em] text-gray-700 dark:text-dark-200"
+              >OpenAI</span
+            >
             <span
               class="rounded bg-primary-100 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
               >{{ t('home.providers.supported') }}</span
             >
           </div>
-          <!-- Gemini - Supported -->
-          <div
-            class="flex items-center gap-2 rounded-xl border border-primary-200 bg-white/60 px-5 py-3 ring-1 ring-primary-500/20 backdrop-blur-sm dark:border-primary-800 dark:bg-dark-800/60"
-          >
+
+          <div class="flex max-w-4xl flex-wrap items-center justify-center gap-3">
             <div
-              class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-blue-600"
+              v-for="model in supportedOpenAIModels"
+              :key="model"
+              class="flex items-center gap-2 rounded-full border border-primary-200 bg-white/75 px-4 py-2 text-sm font-medium text-gray-700 ring-1 ring-primary-500/10 backdrop-blur-sm transition-colors hover:border-primary-300 hover:bg-white dark:border-primary-800 dark:bg-dark-800/70 dark:text-dark-100 dark:hover:border-primary-700"
             >
-              <span class="text-xs font-bold text-white">G</span>
+              <span
+                class="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-green-500 to-green-600 text-[10px] font-bold text-white"
+                >G</span
+              >
+              <span>{{ model }}</span>
             </div>
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('home.providers.gemini') }}</span>
-            <span
-              class="rounded bg-primary-100 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
-              >{{ t('home.providers.supported') }}</span
-            >
-          </div>
-          <!-- Antigravity - Supported -->
-          <div
-            class="flex items-center gap-2 rounded-xl border border-primary-200 bg-white/60 px-5 py-3 ring-1 ring-primary-500/20 backdrop-blur-sm dark:border-primary-800 dark:bg-dark-800/60"
-          >
-            <div
-              class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-rose-500 to-pink-600"
-            >
-              <span class="text-xs font-bold text-white">A</span>
-            </div>
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('home.providers.antigravity') }}</span>
-            <span
-              class="rounded bg-primary-100 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
-              >{{ t('home.providers.supported') }}</span
-            >
-          </div>
-          <!-- More - Coming Soon -->
-          <div
-            class="flex items-center gap-2 rounded-xl border border-gray-200/50 bg-white/40 px-5 py-3 opacity-60 backdrop-blur-sm dark:border-dark-700/50 dark:bg-dark-800/40"
-          >
-            <div
-              class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-gray-500 to-gray-600"
-            >
-              <span class="text-xs font-bold text-white">+</span>
-            </div>
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('home.providers.more') }}</span>
-            <span
-              class="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-dark-700 dark:text-dark-400"
-              >{{ t('home.providers.soon') }}</span
-            >
           </div>
         </div>
       </div>
@@ -463,31 +418,18 @@
 
     <!-- Footer -->
     <footer class="relative z-10 border-t border-gray-200/50 px-6 py-8 dark:border-dark-800/50">
-      <div
-        class="mx-auto flex max-w-6xl flex-col items-center justify-center gap-4 text-center sm:flex-row sm:text-left"
-      >
+      <div class="mx-auto flex max-w-6xl flex-col items-center justify-center gap-2 text-center">
         <p class="text-sm text-gray-500 dark:text-dark-400">
-          &copy; {{ currentYear }} {{ siteName }}. {{ t('home.footer.allRightsReserved') }}
+          &copy; {{ currentYear }} {{ siteName }}. 保留所有权利。
         </p>
-        <div class="flex items-center gap-4">
-          <a
-            v-if="docUrl"
-            :href="docUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-dark-400 dark:hover:text-white"
-          >
-            {{ t('home.docs') }}
-          </a>
-          <a
-            :href="githubUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-dark-400 dark:hover:text-white"
-          >
-            GitHub
-          </a>
-        </div>
+        <a
+          href="https://beian.miit.gov.cn/"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-dark-400 dark:hover:text-white"
+        >
+          浙ICP备2026026942号
+        </a>
       </div>
     </footer>
   </div>
@@ -516,6 +458,13 @@ const homeContent = computed(() => appStore.cachedPublicSettings?.home_content |
 const hasHomeContent = computed(() => homeContent.value.trim().length > 0)
 const compactHomeEnabled = computed(() => appStore.cachedPublicSettings?.compact_home_enabled === true)
 const modelPlazaEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.modelPlaza))
+const supportedOpenAIModels = [
+  'gpt-5.3-codex',
+  'gpt-5.3-codex-spark',
+  'gpt-5.4',
+  'gpt-5.4-mini',
+  'gpt-5.5'
+]
 
 // Check if homeContent is a URL (for iframe display)
 const isHomeContentUrl = computed(() => {
@@ -525,9 +474,6 @@ const isHomeContentUrl = computed(() => {
 
 // Theme
 const isDark = ref(document.documentElement.classList.contains('dark'))
-
-// GitHub URL
-const githubUrl = 'https://github.com/Wei-Shaw/sub2api'
 
 // Auth state
 const isAuthenticated = computed(() => authStore.isAuthenticated)

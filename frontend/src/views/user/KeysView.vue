@@ -1673,6 +1673,11 @@ const loadUserGroupRates = async () => {
   }
 }
 
+const refreshGroupAccess = () => {
+  void loadGroups()
+  void loadUserGroupRates()
+}
+
 const loadPublicSettings = async () => {
   try {
     publicSettings.value = await authAPI.getPublicSettings()
@@ -1963,6 +1968,16 @@ const closeModals = () => {
   }
 }
 
+watch([showCreateModal, showEditModal], ([createOpen, editOpen]) => {
+  if (createOpen || editOpen) {
+    refreshGroupAccess()
+  }
+})
+
+const handleWindowFocus = () => {
+  refreshGroupAccess()
+}
+
 // Show reset quota confirmation dialog
 const confirmResetQuota = () => {
   showResetQuotaDialog.value = true
@@ -2100,15 +2115,16 @@ function formatResetTime(resetAt: string | null): string {
 onMounted(() => {
   loadSavedColumns()
   loadApiKeys()
-  loadGroups()
-  loadUserGroupRates()
+  refreshGroupAccess()
   loadPublicSettings()
   document.addEventListener('click', closeGroupSelector)
+  window.addEventListener('focus', handleWindowFocus)
   resetTimer = setInterval(() => { now.value = new Date() }, 60000)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', closeGroupSelector)
+  window.removeEventListener('focus', handleWindowFocus)
   if (resetTimer) clearInterval(resetTimer)
 })
 </script>

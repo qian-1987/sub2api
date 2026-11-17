@@ -1,0 +1,136 @@
+# syntax=docker/dockerfile:1.7
+# =============================================================================
+# Sub2API Multi-Stage Dockerfile
+# =============================================================================
+# Stage 1: Build frontend
+# Stage 2: Build Go backend with embedded frontend
+# Stage 3: Final minimal image
+# =============================================================================
+
+ARG NODE_IMAGE=node:24-alpine
+ARG GOLANG_IMAGE=golang:1.27.3-alpine
+ARG ALPINE_IMAGE=alpine:3.21
+ARG POSTGRES_IMAGE=postgres:18-alpine
+ARG GOPROXY=https://goproxy.cn,direct
+ARG GOSUMDB=sum.golang.google.cn
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG NPM_CONFIG_REGISTRY=
+# Vite/vue-tsc can exceed Node's default heap limit in production builds.
+# Keep this configurable because the build host must have at least this much
+# available memory plus Docker/build overhead.
+ARG NODE_MAX_OLD_SPACE_SIZE=4096
+# Optional Alpine repository base URL. The deploy helper passes a mirror here
+# because the default CDN is not consistently reachable from all servers.
+ARG ALPINE_REPOSITORY=
+
+# -----------------------------------------------------------------------------
+# Stage 1: Frontend Builder
+# -----------------------------------------------------------------------------
+# --platform=$BUILDPLATFORM: the frontend output is JS (arch-neutral), so build
+# it on the native host arch instead of under QEMU emulation for the target.
+FROM --platform=${BUILDPLATFORM} ${NODE_IMAGE} AS frontend-builder
+ARG NPM_REGISTRY
+ARG NPM_CONFIG_REGISTRY
+ARG NODE_MAX_OLD_SPACE_SIZE
+
+WORKDIR /app/frontend
+
+ENV COREPACK_NPM_REGISTRY=${NPM_REGISTRY} \
+    npm_config_registry=${NPM_REGISTRY} \
+    NODE_OPTIONS=--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}
+
+# Install pnpm (pinned to v9 to match CI and keep builds reproducible)
+RUN corepack enable && corepack prepare pnpm@9 --activate
+
+# Install dependencies first (better caching)
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN registry="${NPM_CONFIG_REGISTRY:-${NPM_REGISTRY}}" && \
+    if [ -n "${registry}" ]; then pnpm config set registry "${registry}"; fi && \
+    pnpm install --frozen-lockfile --prefer-offline
+
+# Copy frontend source and build.
+# LegalDocumentView.vue (admin-compliance gate) build-time imports
+# ../../../../docs/legal/*.md?raw, so docs/legal/ must sit beside frontend/
+# in the image (WORKDIR /app/frontend -> resolves to /app/docs/legal/*.md).
+# Copy only that subtree to keep the build dependency minimal.
+COPY frontend/ ./
+COPY docs/legal/ /app/docs/legal/
+RUN echo 'packages:' >> pnpm-workspace.yaml && echo '  - . ' >> pnpm-workspace.yaml && nice -n 15 pnpm exec vitest run src/utils/__tests__/cacheLifetime.spec.ts src/utils/__tests__/intervalPrices.spec.ts src/components/modelPlaza/__tests__/PlazaModelPricingTable.spec.ts src/components/channels/__tests__/SupportedModelChip.spec.ts src/components/admin/channel/__tests__/IntervalRow.spec.ts src/components/admin/channel/__tests__/PricingEntryCard.modelDefaultPrice.spec.ts src/components/admin/usage/__tests__/UsageTable.spec.ts --maxWorkers=1 --minWorkers=1 && pnpm run build
+
+# -----------------------------------------------------------------------------
+# Stage 2: Backend Builder
+# -----------------------------------------------------------------------------
+# --platform=$BUILDPLATFORM: run the Go toolchain on the native host arch and
+# cross-compile to the target arch below. The binary is CGO_ENABLED=0, so this
+# is a clean pure-Go cross-compile — no QEMU emulation of go mod download / go
+# build (emulated networking here was dropping module fetches with EOF).
+FROM --platform=${BUILDPLATFORM} ${GOLANG_IMAGE} AS backend-builder
+
+# Build arguments for version info (set by CI)
+ARG VERSION=
+ARG COMMIT=docker
+ARG DATE
+ARG GOPROXY
+ARG GOSUMDB
+# Populated by buildx from the --platform target (e.g. linux/amd64).
+ARG TARGETOS
+ARG TARGETARCH
+ARG GO_BUILD_GOMAXPROCS=
+ARG GO_BUILD_P=
+ARG ALPINE_REPOSITORY
+
+ENV GOPROXY=${GOPROXY}
+ENV GOSUMDB=${GOSUMDB}
+
+# Install build dependencies. Keep the repository version/path from the base
+# image, replacing only its Alpine mirror host when a mirror was supplied.
+RUN if [ -n "${ALPINE_REPOSITORY}" ]; then \
+      sed -i -E "s#^https?://[^/]+/alpine#${ALPINE_REPOSITORY}#" /etc/apk/repositories; \
+    fi && \
+    apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /app/backend
+
+# Copy go mod files first (better caching)
+COPY backend/go.mod backend/go.sum ./
+# Cache mount keeps the module cache across builds so a transient CDN blip on
+# retry resumes instead of re-fetching every zip from scratch.
+RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
+    go mod download
+
+# Copy backend source first
+COPY backend/ ./
+
+# Copy frontend dist from previous stage (must be after backend copy to avoid being overwritten)
+COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist
+
+# Build the binary (BuildType=release for CI builds, embed frontend)
+# Version precedence: build arg VERSION > exact git tag > cmd/server/VERSION
+RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
+    --mount=type=cache,id=sub2api-gobuild,target=/root/.cache/go-build \
+    VERSION_VALUE="${VERSION}" && \
+    if [ -z "${VERSION_VALUE}" ]; then VERSION_VALUE="$(./scripts/resolve-version.sh)"; fi && \
+    DATE_VALUE="${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
+    GO_BUILD_FLAGS="" && \
+    if [ -n "${GO_BUILD_P}" ]; then GO_BUILD_FLAGS="-p=${GO_BUILD_P}"; fi && \
+    if [ -n "${GO_BUILD_GOMAXPROCS}" ]; then export GOMAXPROCS="${GO_BUILD_GOMAXPROCS}"; fi && \
+    GOMEMLIMIT=900MiB CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+    ${GO_BUILD_FLAGS} \
+    -tags embed \
+    -ldflags="-s -w -X main.Version=${VERSION_VALUE} -X main.Commit=${COMMIT} -X main.Date=${DATE_VALUE} -X main.BuildType=release" \
+    -trimpath \
+    -o /app/sub2api \
+    ./cmd/server
+
+# -----------------------------------------------------------------------------
+
+FROM backend-builder AS cachefix-tests
+# Compile the complete production package with focused billing/usage regressions.
+# Unrelated baseline tests remain intact in source; isolate only in this test layer.
+RUN mkdir -p /tmp/qike-unrelated-tests && for f in internal/service/*_test.go; do case "$f" in internal/service/billing_service*_test.go|internal/service/billing_context_schedule_test.go|internal/service/billing_openai_cache_test.go|internal/service/billing_search_audio_cost_test.go|internal/service/billing_token_cost_request_test.go|internal/service/testhelpers_test.go|internal/service/pricing*_test.go|internal/service/model_pricing*_test.go|internal/service/context_pricing*_test.go|internal/service/channel_service_test.go|internal/service/openai_gateway_record_usage_test.go|internal/service/openai_gateway_cache_ttl_usage_test.go) ;; *) mv "$f" /tmp/qike-unrelated-tests/ ;; esac; done
+COPY cachefix_test_helpers.go ./internal/service/cachefix_extra_helpers_test.go
+RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod --mount=type=cache,id=sub2api-gobuild,target=/root/.cache/go-build \
+    nice -n 15 env GOMAXPROCS=1 GOMEMLIMIT=1800MiB CGO_ENABLED=0 go test -p=1 -tags unit ./internal/pkg/openai ./internal/pkg/apicompat ./internal/service/openai_ws_v2 ./internal/service ./internal/handler/dto -run 'Test(UsageLogFromService|CacheWriteBreakdownFromUsage|ResponsesCacheTTLUsage|RelayCacheTTLUsage|OpenAICacheTTL|CalculateCost|ModelPricingResolver|Pricing|ParsePricingData|Resolve|GetIntervalPricing|GPT56ExplicitZero|BillingServiceGPT6|BillingService_GPT56|ContextPricing|OpenAI.*Usage|RecordUsage)' -count=1
+
+FROM sub2api:prod-20261024-052417-auto-unlock-vip AS runtime
+COPY --from=cachefix-tests --chown=sub2api:sub2api /app/sub2api /app/sub2api

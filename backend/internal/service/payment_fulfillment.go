@@ -461,6 +461,9 @@ func (s *PaymentService) markCompleted(ctx context.Context, o *dbent.PaymentOrde
 	if lease == nil {
 		return errors.New("missing payment fulfillment lease")
 	}
+	if o != nil && auditAction == "RECHARGE_SUCCESS" && o.OrderType == payment.OrderTypeBalance {
+		s.tryAutoUnlockGroupAfterBalanceRecharge(ctx, o)
+	}
 	now := time.Now()
 	updated, err := s.entClient.PaymentOrder.Update().Where(
 		paymentorder.IDEQ(o.ID),

@@ -10,7 +10,7 @@
 # Documentation
 *.md
 !deploy/DOCKER.md
-docs/
+docs/*
 # admin-compliance gate (LegalDocumentView.vue) build-time imports
 # docs/legal/*.md?raw into the frontend bundle; keep that subtree in the
 # Docker build context even though docs/ is otherwise excluded.
@@ -37,6 +37,13 @@ node_modules/
 
 # Go build cache (will be built in container)
 backend/vendor/
+
+# Obsolete source replaced by model_plaza_service.go in v0.1.180.
+# Release archives are sometimes extracted over an existing source tree, and
+# tar does not remove files deleted by the newer release. Exclude the legacy
+# implementation so it cannot be compiled alongside its replacement.
+backend/internal/service/channel_plaza.go
+backend/internal/service/channel_plaza_test.go
 
 # Test files
 *_test.go

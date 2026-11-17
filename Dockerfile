@@ -13,7 +13,15 @@ ARG ALPINE_IMAGE=alpine:3.21
 ARG POSTGRES_IMAGE=postgres:18-alpine
 ARG GOPROXY=https://goproxy.cn,direct
 ARG GOSUMDB=sum.golang.google.cn
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG NPM_CONFIG_REGISTRY=
+# Vite/vue-tsc can exceed Node's default heap limit in production builds.
+# Keep this configurable because the build host must have at least this much
+# available memory plus Docker/build overhead.
+ARG NODE_MAX_OLD_SPACE_SIZE=4096
+# Optional Alpine repository base URL. The deploy helper passes a mirror here
+# because the default CDN is not consistently reachable from all servers.
+ARG ALPINE_REPOSITORY=
 
 # -----------------------------------------------------------------------------
 # Stage 1: Frontend Builder
@@ -21,17 +29,23 @@ ARG NPM_CONFIG_REGISTRY=
 # --platform=$BUILDPLATFORM: the frontend output is JS (arch-neutral), so build
 # it on the native host arch instead of under QEMU emulation for the target.
 FROM --platform=${BUILDPLATFORM} ${NODE_IMAGE} AS frontend-builder
+ARG NPM_REGISTRY
 ARG NPM_CONFIG_REGISTRY
+ARG NODE_MAX_OLD_SPACE_SIZE
 
 WORKDIR /app/frontend
+
+ENV COREPACK_NPM_REGISTRY=${NPM_REGISTRY} \
+    npm_config_registry=${NPM_REGISTRY} \
+    NODE_OPTIONS=--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}
 
 # Install pnpm (pinned to v9 to match CI and keep builds reproducible)
 RUN corepack enable && corepack prepare pnpm@9 --activate
 
 # Install dependencies first (better caching)
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN --mount=type=cache,id=sub2api-pnpm-store,target=/root/.local/share/pnpm/store \
-    if [ -n "${NPM_CONFIG_REGISTRY}" ]; then pnpm config set registry "${NPM_CONFIG_REGISTRY}"; fi && \
+RUN registry="${NPM_CONFIG_REGISTRY:-${NPM_REGISTRY}}" && \
+    if [ -n "${registry}" ]; then pnpm config set registry "${registry}"; fi && \
     pnpm install --frozen-lockfile --prefer-offline
 
 # Copy frontend source and build.
@@ -61,12 +75,19 @@ ARG GOSUMDB
 # Populated by buildx from the --platform target (e.g. linux/amd64).
 ARG TARGETOS
 ARG TARGETARCH
+ARG GO_BUILD_GOMAXPROCS=
+ARG GO_BUILD_P=
+ARG ALPINE_REPOSITORY
 
 ENV GOPROXY=${GOPROXY}
 ENV GOSUMDB=${GOSUMDB}
 
-# Install build dependencies
-RUN apk add --no-cache git ca-certificates tzdata
+# Install build dependencies. Keep the repository version/path from the base
+# image, replacing only its Alpine mirror host when a mirror was supplied.
+RUN if [ -n "${ALPINE_REPOSITORY}" ]; then \
+      sed -i -E "s#^https?://[^/]+/alpine#${ALPINE_REPOSITORY}#" /etc/apk/repositories; \
+    fi && \
+    apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app/backend
 
@@ -90,7 +111,11 @@ RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
     VERSION_VALUE="${VERSION}" && \
     if [ -z "${VERSION_VALUE}" ]; then VERSION_VALUE="$(./scripts/resolve-version.sh)"; fi && \
     DATE_VALUE="${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
+    GO_BUILD_FLAGS="" && \
+    if [ -n "${GO_BUILD_P}" ]; then GO_BUILD_FLAGS="-p=${GO_BUILD_P}"; fi && \
+    if [ -n "${GO_BUILD_GOMAXPROCS}" ]; then export GOMAXPROCS="${GO_BUILD_GOMAXPROCS}"; fi && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
+    ${GO_BUILD_FLAGS} \
     -tags embed \
     -ldflags="-s -w -X main.Version=${VERSION_VALUE} -X main.Commit=${COMMIT} -X main.Date=${DATE_VALUE} -X main.BuildType=release" \
     -trimpath \
@@ -106,14 +131,19 @@ FROM ${POSTGRES_IMAGE} AS pg-client
 # Stage 4: Final Runtime Image
 # -----------------------------------------------------------------------------
 FROM ${ALPINE_IMAGE}
+ARG ALPINE_REPOSITORY
 
 # Labels
 LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
 LABEL description="Sub2API - AI API Gateway Platform"
 LABEL org.opencontainers.image.source="https://github.com/Wei-Shaw/sub2api"
 
-# Install runtime dependencies
-RUN apk add --no-cache \
+# Install runtime dependencies. Keep the repository version/path from the base
+# image, replacing only its Alpine mirror host when a mirror was supplied.
+RUN if [ -n "${ALPINE_REPOSITORY}" ]; then \
+      sed -i -E "s#^https?://[^/]+/alpine#${ALPINE_REPOSITORY}#" /etc/apk/repositories; \
+    fi && \
+    apk add --no-cache \
     ca-certificates \
     tzdata \
     su-exec \
