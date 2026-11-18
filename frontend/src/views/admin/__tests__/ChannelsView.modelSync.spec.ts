@@ -8,8 +8,9 @@ import {
 } from '@/constants/platformCatalog'
 import ChannelsView from '@/views/admin/ChannelsView.vue'
 
-const { listChannels, getGroups, syncPricingModels, showSuccess, showError } = vi.hoisted(() => ({
+const { listChannels, createChannel, getGroups, syncPricingModels, showSuccess, showError } = vi.hoisted(() => ({
   listChannels: vi.fn(),
+  createChannel: vi.fn(),
   getGroups: vi.fn(),
   syncPricingModels: vi.fn(),
   showSuccess: vi.fn(),
@@ -18,7 +19,7 @@ const { listChannels, getGroups, syncPricingModels, showSuccess, showError } = v
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    channels: { list: listChannels, syncPricingModels },
+    channels: { list: listChannels, create: createChannel, syncPricingModels },
     groups: { getAll: getGroups },
     settings: { getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false }) }
   }
@@ -150,6 +151,37 @@ describe('ChannelsView pricing model sync', () => {
     expect(wrapper.get('.pricing-entry').text()).toBe('gpt-latest')
     expect(visibleSyncButtons(wrapper)[0].attributes('disabled')).toBeUndefined()
     expect(showError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('shows official names while saving model IDs', async () => {
+    getGroups.mockResolvedValue([{ id: 22, name: 'OpenAI group', platform: 'openai', rate_multiplier: 1 }])
+    createChannel.mockResolvedValue({})
+    const wrapper = mountView()
+    await openDialog(wrapper)
+    await wrapper.get('input[required]').setValue('OpenAI channel')
+    await enablePlatform(wrapper, 'openai')
+    await wrapper.findAll('label').find(label => label.text().includes('OpenAI group'))!
+      .get('input[type="checkbox"]').setValue(true)
+    const mapping = wrapper.findAll('label').find(label => label.text() === 'admin.channels.form.modelMapping')!
+    mapping.element.parentElement!.querySelector('button')!.click()
+    await flushPromises()
+
+    const source = wrapper.get<HTMLInputElement>('input[placeholder="admin.channels.form.mappingSource"]')
+    await source.setValue('gpt-6.2-astra')
+    const target = wrapper.get<HTMLInputElement>('input[placeholder="admin.channels.form.mappingTarget"]')
+    await target.setValue('gpt-6.2-sol')
+    expect(wrapper.get('#channel-form').text()).toContain('GPT-6.2 Astra')
+    expect(wrapper.get('#channel-form').text()).toContain('GPT-6.2 Sol')
+    expect(target.element.value).toBe('gpt-6.2-sol')
+
+    await wrapper.get('#channel-form').trigger('submit')
+    await flushPromises()
+    expect(showError).not.toHaveBeenCalled()
+    expect(createChannel).toHaveBeenCalledOnce()
+    expect(createChannel.mock.calls[0][0].model_mapping).toEqual({
+      openai: { 'gpt-6.2-astra': 'gpt-6.2-sol' }
+    })
     wrapper.unmount()
   })
 })

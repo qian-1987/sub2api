@@ -389,19 +389,17 @@
                   :key="srcModel"
                   class="flex items-center gap-2"
                 >
-                  <input
-                    :value="srcModel"
-                    type="text"
-                    class="input flex-1 text-xs"
+                  <ModelMappingInput
+                    :model="srcModel"
+                    :platform="section.platform"
                     :class="platformTextClass(section.platform)"
                     :placeholder="t('admin.channels.form.mappingSource', 'Source model')"
                     @change="renameMappingKey(sIdx, srcModel, ($event.target as HTMLInputElement).value)"
                   />
                   <span class="text-gray-400 text-xs">→</span>
-                  <input
-                    :value="section.model_mapping[srcModel]"
-                    type="text"
-                    class="input flex-1 text-xs"
+                  <ModelMappingInput
+                    :model="section.model_mapping[srcModel]"
+                    :platform="section.platform"
                     :class="platformTextClass(section.platform)"
                     :placeholder="t('admin.channels.form.mappingTarget', 'Target model')"
                     @input="section.model_mapping[srcModel] = ($event.target as HTMLInputElement).value"
@@ -450,6 +448,7 @@
                   :platform="section.platform"
                   enable-time-pricing
                   enable-tier-multipliers
+                  show-official-model-names
                   @update="updatePricingEntry(sIdx, idx, $event)"
                   @remove="removePricingEntry(sIdx, idx)"
                 />
@@ -580,6 +579,7 @@
                       :key="pIdx"
                       :entry="entry"
                       :platform="section.platform"
+                      show-official-model-names
                       @update="rule.pricing.splice(pIdx, 1, $event)"
                       @remove="removeRulePricingEntry(sIdx, ruleIndex, pIdx)"
                     />
@@ -651,6 +651,7 @@ import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Toggle from '@/components/common/Toggle.vue'
+import ModelMappingInput from '@/components/admin/channel/ModelMappingInput.vue'
 import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useKeyedDebouncedSearch } from '@/composables/useKeyedDebouncedSearch'

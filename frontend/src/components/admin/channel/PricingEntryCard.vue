@@ -21,8 +21,9 @@
             :key="i"
             class="inline-flex shrink-0 rounded px-1.5 py-0.5 text-xs"
             :class="getPlatformTagClass(props.platform || '')"
+            :title="showOfficialModelNames ? m : undefined"
           >
-            {{ m }}
+            {{ showOfficialModelNames ? channelModelDisplayName(m, platform) : m }}
           </span>
           <span
             v-if="entry.models.length > 3"
@@ -76,6 +77,7 @@
             <ModelTagInput
               :models="entry.models"
               :platform="props.platform"
+              :show-official-model-names="showOfficialModelNames"
               @update:models="onModelsUpdate($event)"
               :placeholder="t('admin.channels.form.modelsPlaceholder')"
               class="mt-1"
@@ -311,6 +313,7 @@ import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import IntervalRow from './IntervalRow.vue'
 import ModelTagInput from './ModelTagInput.vue'
+import { channelModelDisplayName } from './modelDisplayName'
 import TimePricingSection from './TimePricingSection.vue'
 import type { PricingFormEntry, IntervalFormEntry } from './types'
 import { perTokenToMTok, getPlatformTagClass, isValidPositiveMultiplier, validateReasoningEffortMultipliers } from './types'
@@ -326,6 +329,7 @@ const props = withDefaults(defineProps<{
   hideTokenIntervals?: boolean
   enableTimePricing?: boolean
   enableTierMultipliers?: boolean
+  showOfficialModelNames?: boolean
 }>(), {
   hideTokenIntervals: false,
   enableTimePricing: false,

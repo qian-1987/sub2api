@@ -7,8 +7,9 @@
         :key="idx"
         class="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-sm"
         :class="getPlatformTagClass(props.platform || '')"
+        :title="showOfficialModelNames ? model : undefined"
       >
-        {{ model }}
+        {{ showOfficialModelNames ? channelModelDisplayName(model, platform) : model }}
         <button
           type="button"
           @click="removeModel(idx)"
@@ -40,6 +41,7 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import { channelModelDisplayName } from './modelDisplayName'
 import { getPlatformTagClass } from './types'
 
 const { t } = useI18n()
@@ -48,6 +50,7 @@ const props = defineProps<{
   models: string[]
   placeholder?: string
   platform?: string
+  showOfficialModelNames?: boolean
 }>()
 
 const emit = defineEmits<{
