@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -780,6 +781,67 @@ func openAICompatTerminalResponse(event *apicompat.ResponsesStreamEvent, payload
 	}
 }
 
+// reconcileOpenAICompatTerminalUsage keeps the selected terminal snapshot in
+// sync with billing. A non-empty nested snapshot remains authoritative; empty
+// or null fields cannot erase earlier usage, while an explicit cache-write zero
+// still clears that bucket. response may be a synthetic error response.
+func reconcileOpenAICompatTerminalUsage(event *apicompat.ResponsesStreamEvent, response *apicompat.ResponsesResponse, payload []byte, usage *OpenAIUsage) {
+	if event == nil || usage == nil {
+		return
+	}
+	var preferred *apicompat.ResponsesUsage
+	var raw gjson.Result
+	switch {
+	case response != nil && response.Usage != nil:
+		preferred = response.Usage
+		raw = gjson.GetBytes(payload, "response.usage")
+	case event.Usage != nil:
+		preferred = event.Usage
+		raw = gjson.GetBytes(payload, "usage")
+	case openAIUsageHasTokens(usage):
+		preferred = &apicompat.ResponsesUsage{}
+	default:
+		return
+	}
+	selected := copyOpenAIUsageFromResponsesUsage(preferred)
+	if raw.Exists() {
+		mergeOpenAIStreamUsage(usage, selected, raw, true)
+	}
+	if selected != *usage {
+		preferred = openAICompatResponseUsageFromObserved(preferred, *usage)
+	}
+	if response != nil {
+		response.Usage = preferred
+	} else {
+		event.Usage = preferred
+	}
+}
+
+func openAICompatResponseUsageFromObserved(original *apicompat.ResponsesUsage, usage OpenAIUsage) *apicompat.ResponsesUsage {
+	out := *original
+	out.InputTokens = usage.InputTokens
+	out.OutputTokens = usage.OutputTokens
+	out.TotalTokens = usage.InputTokens + usage.OutputTokens
+	out.CacheCreationInputTokens = usage.CacheCreationInputTokens
+	if out.InputTokensDetails != nil || usage.CacheReadInputTokens > 0 || usage.CacheCreationInputTokens > 0 {
+		details := &apicompat.ResponsesInputTokensDetails{}
+		if out.InputTokensDetails != nil {
+			*details = *out.InputTokensDetails
+		}
+		details.CachedTokens = usage.CacheReadInputTokens
+		details.CacheWriteTokens = usage.CacheCreationInputTokens
+		details.CacheCreationTokens = 0
+		details.CacheWriteTokensDetails = nil
+		if usage.CacheCreationInputTokens > 0 && usage.CacheCreation30mInputTokens >= 0 &&
+			usage.CacheCreation30mInputTokens <= usage.CacheCreationInputTokens &&
+			usage.CacheCreation12hInputTokens == usage.CacheCreationInputTokens-usage.CacheCreation30mInputTokens {
+			short, long := usage.CacheCreation30mInputTokens, usage.CacheCreation12hInputTokens
+			details.CacheWriteTokensDetails = &openai.CacheWriteTokensDetails{TTL30mTokens: &short, TTL12hTokens: &long}
+		}
+		out.InputTokensDetails = details
+	}
+	return &out
+}
 func openAICompatBufferedPriorModel(event *apicompat.ResponsesStreamEvent) (string, bool) {
 	if event == nil || event.Response == nil || isOpenAICompatResponsesTerminalEvent(event.Type) {
 		return "", false
@@ -929,15 +991,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 						acc.ProcessEvent(&event)
 						recordPrior(&event)
 						if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
-							if event.Usage != nil {
-								usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
-								if response.Usage == nil {
-									response.Usage = event.Usage
-								}
-							}
-							if response.Usage != nil {
-								usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
-							}
+							reconcileOpenAICompatTerminalUsage(&event, response, []byte(payload), &usage)
 							return response, usage, acc, prior, nil
 						}
 					}
@@ -979,15 +1033,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			recordPrior(&event)
 
 			if response := openAICompatTerminalResponse(&event, []byte(payload)); isOpenAICompatResponsesTerminalEvent(event.Type) && response != nil {
-				if event.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
-					if response.Usage == nil {
-						response.Usage = event.Usage
-					}
-				}
-				if response.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(response.Usage)
-				}
+				reconcileOpenAICompatTerminalUsage(&event, response, []byte(payload), &usage)
 				return response, usage, acc, prior, nil
 			}
 
@@ -1139,13 +1185,8 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 				if id := strings.TrimSpace(event.Response.ID); id != "" {
 					responseID = id
 				}
-				if event.Response.Usage != nil {
-					usage = copyOpenAIUsageFromResponsesUsage(event.Response.Usage)
-				}
 			}
-			if event.Usage != nil {
-				usage = copyOpenAIUsageFromResponsesUsage(event.Usage)
-			}
+			reconcileOpenAICompatTerminalUsage(&event, event.Response, []byte(payload), &usage)
 			// cyber_policy 致命不可重试：标记供 handler 事后记录；以 Anthropic SSE error 事件
 			// 回写让客户端感知并停止重试（F4），丢弃后续转换输出。
 			if eventType == "response.failed" || isBareErrorEvent {
